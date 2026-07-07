@@ -34,7 +34,7 @@ export default class AIRefinerPlugin extends Plugin {
 		);
 		registerCommands(this, this.refineSelectionService, this.getTranslator());
 
-		this.registerDomEvent(document, "keydown", (event: KeyboardEvent) => {
+		this.registerDomEvent(activeDocument, "keydown", (event: KeyboardEvent) => {
 			void this.handleConfiguredHotkey(event);
 		});
 

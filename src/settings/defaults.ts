@@ -76,7 +76,7 @@ export const DEFAULT_SETTINGS: AIRefinerSettings = {
 
 export function mergeSettings(raw: Partial<AIRefinerSettings> | null | undefined): AIRefinerSettings {
 	const migrated = migrateRawSettings(raw);
-	const legacyRaw = migrated as LegacySettingsShape | null | undefined;
+	const legacyRaw: LegacySettingsShape | null | undefined = migrated;
 	const customApiRaw =
 		legacyRaw?.customApi
 		?? legacyRaw?.httpApi

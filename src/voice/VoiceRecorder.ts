@@ -13,6 +13,24 @@ const WAV_BYTES_PER_SAMPLE = 2;
 const WAV_FORMAT_PCM = 1;
 const WAV_BITS_PER_SAMPLE = 16;
 
+// ScriptProcessorNode is deprecated in the DOM types, but it remains the most
+// broadly available PCM-capture path in Obsidian's Electron runtime (AudioWorklet
+// is not reliably present). It is used through these minimal local shapes so the
+// code never touches the deprecated declarations directly.
+interface AudioProcessEvent {
+	inputBuffer: { getChannelData(channel: number): Float32Array };
+}
+
+interface AudioProcessorNode {
+	connect(destination: AudioNode): void;
+	disconnect(): void;
+	onaudioprocess: ((event: AudioProcessEvent) => void) | null;
+}
+
+interface ScriptProcessorFactory {
+	createScriptProcessor(bufferSize: number, inputChannels: number, outputChannels: number): AudioProcessorNode;
+}
+
 export interface VoiceRecorderCallbacks {
 	// Fired whenever the recording state flips, so the host can refresh its UI.
 	onRecordingStateChange(): void;
@@ -32,8 +50,7 @@ export class VoiceRecorder {
 	private recordedChunks: BlobPart[] = [];
 	private audioContext: AudioContext | null = null;
 	private audioSourceNode: MediaStreamAudioSourceNode | null = null;
-	// eslint-disable-next-line @typescript-eslint/no-deprecated -- AudioWorklet capture is not consistently available in Obsidian/Electron.
-	private audioProcessorNode: ScriptProcessorNode | null = null;
+	private audioProcessorNode: AudioProcessorNode | null = null;
 	private silentGainNode: GainNode | null = null;
 	private pcmChunks: Float32Array[] = [];
 	private pcmSampleRate = VOICE_DEFAULT_SAMPLE_RATE;
@@ -170,8 +187,7 @@ export class VoiceRecorder {
 
 		try {
 			const source = audioContext.createMediaStreamSource(stream);
-			// eslint-disable-next-line @typescript-eslint/no-deprecated -- Fallback path for environments without reliable supported media container.
-			const processor = audioContext.createScriptProcessor(
+			const processor = (audioContext as unknown as ScriptProcessorFactory).createScriptProcessor(
 				VOICE_PCM_BUFFER_SIZE,
 				PCM_CHANNEL_COUNT,
 				PCM_CHANNEL_COUNT,
@@ -184,18 +200,16 @@ export class VoiceRecorder {
 				Math.floor(audioContext.sampleRate || VOICE_DEFAULT_SAMPLE_RATE),
 			);
 			this.pcmChunks = [];
-			// eslint-disable-next-line @typescript-eslint/no-deprecated -- See createScriptProcessor fallback note above.
 			processor.onaudioprocess = (event) => {
 				if (!this.recording) {
 					return;
 				}
 
-				// eslint-disable-next-line @typescript-eslint/no-deprecated -- Part of ScriptProcessor fallback.
 				const channel = event.inputBuffer.getChannelData(0);
 				this.pcmChunks.push(new Float32Array(channel));
 			};
 
-			source.connect(processor);
+			source.connect(processor as unknown as AudioNode);
 			processor.connect(silentGain);
 			silentGain.connect(audioContext.destination);
 
@@ -271,7 +285,6 @@ export class VoiceRecorder {
 		}
 		if (this.audioProcessorNode) {
 			this.audioProcessorNode.disconnect();
-			// eslint-disable-next-line @typescript-eslint/no-deprecated -- Part of ScriptProcessor fallback teardown.
 			this.audioProcessorNode.onaudioprocess = null;
 		}
 		if (this.silentGainNode) {

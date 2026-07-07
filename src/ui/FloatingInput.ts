@@ -100,7 +100,7 @@ export class FloatingInput {
 		}
 	};
 
-	// Registered on document because the textarea is disabled (and unfocused)
+	// Registered on activeDocument because the textarea is disabled (and unfocused)
 	// while a request is running, so its own keydown handler cannot fire.
 	private readonly handleGlobalKeyDown = (event: KeyboardEvent): void => {
 		if (event.key !== "Escape") {
@@ -133,26 +133,26 @@ export class FloatingInput {
 	constructor(private readonly options: FloatingInputOptions) {
 		const t = options.t;
 		this.currentAnchor = options.anchor;
-		this.mountEl = options.mountEl ?? document.body;
+		this.mountEl = options.mountEl ?? activeDocument.body;
 		this.presets = sanitizePresets(options.presets ?? []);
 
-		this.containerEl = document.createElement("div");
+		this.containerEl = activeDocument.createElement("div");
 		this.containerEl.className = "ai-refiner-floating-input";
-		if (this.mountEl !== document.body) {
+		if (this.mountEl !== activeDocument.body) {
 			this.containerEl.classList.add("ai-refiner-floating-input--scoped");
 		}
 
-		const headerEl = document.createElement("div");
+		const headerEl = activeDocument.createElement("div");
 		headerEl.className = "ai-refiner-floating-input__header";
 
-		const titleEl = document.createElement("div");
+		const titleEl = activeDocument.createElement("div");
 		titleEl.className = "ai-refiner-floating-input__title";
 		titleEl.textContent = t("floating.title");
 
-		const headerMetaEl = document.createElement("div");
+		const headerMetaEl = activeDocument.createElement("div");
 		headerMetaEl.className = "ai-refiner-floating-input__meta";
 
-		const hintEl = document.createElement("div");
+		const hintEl = activeDocument.createElement("div");
 		hintEl.className = "ai-refiner-floating-input__hint";
 		hintEl.textContent = t("floating.hint");
 		headerMetaEl.appendChild(hintEl);
@@ -173,18 +173,18 @@ export class FloatingInput {
 
 		headerEl.append(titleEl, headerMetaEl);
 
-		const bodyEl = document.createElement("div");
+		const bodyEl = activeDocument.createElement("div");
 		bodyEl.className = "ai-refiner-floating-input__body";
 
 		if (this.presets.length > 0) {
-			const presetTitleEl = document.createElement("div");
+			const presetTitleEl = activeDocument.createElement("div");
 			presetTitleEl.className = "ai-refiner-floating-input__preset-title";
 			presetTitleEl.textContent = t("floating.quickPrompts");
 
-			const presetWrapEl = document.createElement("div");
+			const presetWrapEl = activeDocument.createElement("div");
 			presetWrapEl.className = "ai-refiner-floating-input__preset-wrap";
 			for (const preset of this.presets) {
-				const presetButton = document.createElement("button");
+				const presetButton = activeDocument.createElement("button");
 				presetButton.type = "button";
 				presetButton.className = "ai-refiner-floating-input__preset";
 				presetButton.textContent = preset.label;
@@ -197,16 +197,16 @@ export class FloatingInput {
 			bodyEl.append(presetTitleEl, presetWrapEl);
 		}
 
-		this.inputEl = document.createElement("textarea");
+		this.inputEl = activeDocument.createElement("textarea");
 		this.inputEl.className = "ai-refiner-floating-input__instruction";
 		this.inputEl.placeholder = t("floating.placeholder");
 		this.inputEl.rows = 3;
 		this.inputEl.addEventListener("keydown", this.handleInputKeyDown);
 
-		const actionsEl = document.createElement("div");
+		const actionsEl = activeDocument.createElement("div");
 		actionsEl.className = "ai-refiner-floating-input__actions";
 
-		this.cancelButtonEl = document.createElement("button");
+		this.cancelButtonEl = activeDocument.createElement("button");
 		this.cancelButtonEl.type = "button";
 		this.cancelButtonEl.className = "ai-refiner-floating-input__button ai-refiner-floating-input__button--ghost";
 		this.cancelButtonEl.textContent = t("floating.cancel");
@@ -218,7 +218,7 @@ export class FloatingInput {
 			this.close();
 		});
 
-		this.runButtonEl = document.createElement("button");
+		this.runButtonEl = activeDocument.createElement("button");
 		this.runButtonEl.type = "button";
 		this.runButtonEl.className = "ai-refiner-floating-input__button ai-refiner-floating-input__button--primary";
 		this.runButtonEl.textContent = t("floating.run");
@@ -244,9 +244,9 @@ export class FloatingInput {
 
 		window.addEventListener("resize", this.handlePositionChange);
 		window.addEventListener("scroll", this.handlePositionChange, true);
-		document.addEventListener("mousedown", this.handleOutsideClick, true);
-		document.addEventListener("focusin", this.handleFocusChange, true);
-		document.addEventListener("keydown", this.handleGlobalKeyDown, true);
+		activeDocument.addEventListener("mousedown", this.handleOutsideClick, true);
+		activeDocument.addEventListener("focusin", this.handleFocusChange, true);
+		activeDocument.addEventListener("keydown", this.handleGlobalKeyDown, true);
 
 		this.trackIntervalId = window.setInterval(() => this.position(), FLOATING_TRACK_INTERVAL_MS);
 
@@ -273,9 +273,9 @@ export class FloatingInput {
 		this.isOpen = false;
 		window.removeEventListener("resize", this.handlePositionChange);
 		window.removeEventListener("scroll", this.handlePositionChange, true);
-		document.removeEventListener("mousedown", this.handleOutsideClick, true);
-		document.removeEventListener("focusin", this.handleFocusChange, true);
-		document.removeEventListener("keydown", this.handleGlobalKeyDown, true);
+		activeDocument.removeEventListener("mousedown", this.handleOutsideClick, true);
+		activeDocument.removeEventListener("focusin", this.handleFocusChange, true);
+		activeDocument.removeEventListener("keydown", this.handleGlobalKeyDown, true);
 		if (this.trackIntervalId !== null) {
 			window.clearInterval(this.trackIntervalId);
 			this.trackIntervalId = null;
@@ -454,7 +454,7 @@ export class FloatingInput {
 	}
 
 	private createVoiceButton(t: Translator, languageCode: string): HTMLButtonElement {
-		const button = document.createElement("button");
+		const button = activeDocument.createElement("button");
 		button.type = "button";
 		button.className = "ai-refiner-floating-input__voice";
 		button.setAttribute("aria-label", t("floating.voice.start"));
@@ -566,7 +566,7 @@ export class FloatingInput {
 	}
 
 	private prepareMountElement(): void {
-		if (this.mountEl === document.body) {
+		if (this.mountEl === activeDocument.body) {
 			return;
 		}
 
@@ -589,7 +589,7 @@ export class FloatingInput {
 	private toMountCoordinates(bounds: FloatingBounds): FloatingBounds;
 	private toMountCoordinates(anchor: FloatingAnchor): FloatingAnchor;
 	private toMountCoordinates(value: FloatingBounds | FloatingAnchor): FloatingBounds | FloatingAnchor {
-		if (this.mountEl === document.body) {
+		if (this.mountEl === activeDocument.body) {
 			return value;
 		}
 

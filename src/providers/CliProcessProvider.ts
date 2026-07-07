@@ -28,7 +28,8 @@ interface WritableStreamLike {
 	end(): void;
 }
 
-declare const require: ((id: string) => unknown) | undefined;
+type NodeRequire = (id: string) => unknown;
+
 declare const process: { env?: Record<string, string | undefined> } | undefined;
 
 let cachedSpawnProcess: SpawnProcess | null = null;
@@ -98,7 +99,7 @@ export class CliProcessProvider implements IAIProvider {
 			let stdout = "";
 			let stderr = "";
 			let settled = false;
-			let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+			let timeoutHandle: number | null = null;
 			let abortHandler: (() => void) | null = null;
 
 			const child = spawnProcess(target.file, target.args, {
@@ -113,7 +114,7 @@ export class CliProcessProvider implements IAIProvider {
 
 				settled = true;
 				if (timeoutHandle !== null) {
-					clearTimeout(timeoutHandle);
+					window.clearTimeout(timeoutHandle);
 					timeoutHandle = null;
 				}
 				if (abortHandler && abortSignal) {
@@ -143,7 +144,7 @@ export class CliProcessProvider implements IAIProvider {
 				abortSignal.addEventListener("abort", abortHandler, { once: true });
 			}
 
-			timeoutHandle = setTimeout(() => {
+			timeoutHandle = window.setTimeout(() => {
 				child.kill("SIGTERM");
 				settle(new Error(`${this.options.displayName} timed out after ${this.config.timeoutMs} ms.`));
 			}, this.config.timeoutMs);
@@ -329,18 +330,20 @@ function getSpawnProcess(displayName: string): SpawnProcess {
 		return cachedSpawnProcess;
 	}
 
-	if (typeof require !== "function") {
+	// Obsidian exposes Node's require on the desktop (Electron) window only; it is
+	// absent on mobile, which keeps this desktop-only feature from loading node APIs there.
+	const nodeRequire = (window as unknown as { require?: NodeRequire }).require;
+	if (typeof nodeRequire !== "function") {
 		throw new Error(`${displayName} is unavailable on this platform. Use API provider settings.`);
 	}
 
 	try {
-		// eslint-disable-next-line import/no-nodejs-modules -- lazy desktop-only import to keep mobile plugin load safe.
-		const module = require("child_process") as { spawn?: SpawnProcess };
-		if (typeof module.spawn !== "function") {
+		const childProcess = nodeRequire("child_process") as { spawn?: SpawnProcess };
+		if (typeof childProcess.spawn !== "function") {
 			throw new Error("Missing spawn function.");
 		}
 
-		cachedSpawnProcess = module.spawn;
+		cachedSpawnProcess = childProcess.spawn;
 		return cachedSpawnProcess;
 	} catch {
 		throw new Error(`${displayName} is unavailable on this platform. Use API provider settings.`);
