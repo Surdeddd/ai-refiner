@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "ai-refiner",
+	"name": "AI Refiner",
 	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"minAppVersion": "1.8.0",
+	"description": "Refine selected text with a floating prompt using CLI or API providers.",
+	"author": "Maxim Kravtsov",
+	"authorUrl": "https://github.com/Surdeddd",
 	"isDesktopOnly": false
 }

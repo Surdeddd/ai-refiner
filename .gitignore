@@ -1,22 +1,33 @@
-# vscode
-.vscode 
+# Dependencies
+node_modules/
 
-# Intellij
-*.iml
-.idea
-
-# npm
-node_modules
-
-# Don't include the compiled main.js file in the repo.
-# They should be uploaded to GitHub releases instead.
+# Build output (attach to GitHub releases instead of committing)
 main.js
-
-# Exclude sourcemaps
 *.map
 
-# obsidian
+# Editors
+.vscode/
+.idea/
+*.iml
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Obsidian plugin data (may contain API tokens)
 data.json
 
-# Exclude macOS Finder (System Explorer) View States
-.DS_Store
+# Logs and debug output
+*.log
+npm-debug.log*
+
+# Test / coverage output
+coverage/
+
+# Local environment
+.env
+.env.*
+
+# AI agent working files (not part of the plugin)
+memory-bank/
+AGENTS.md

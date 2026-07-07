@@ -1,90 +1,132 @@
-# Obsidian Sample Plugin
+# AI Refiner
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+An Obsidian plugin that refines selected text in place through a floating prompt.
+Select text, describe how you want it changed, and the result replaces your selection.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+It works with cloud APIs, local models, and AI CLIs — you choose the backend, and
+nothing leaves your machine unless you configure it to.
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+## Features
 
-## First time developing plugins?
+- **Floating prompt** anchored to your cursor — type an instruction, press Enter, done.
+- **Quick prompt presets** — one-click Fix grammar, Make clearer, Shorten, Formal tone,
+  Translate — fully editable, and you can add your own.
+- **Multiple backends** through one pipeline (see the table below).
+- **Three ways to trigger**: command palette, ribbon icon, or a custom hotkey.
+- **Optional voice input** — dictate your instruction via a Whisper-compatible
+  transcription endpoint (off by default).
+- **In-flight cancel** — press Escape to abort a running request.
+- **Safe replacement** — if the document changes while a request runs, the stale result
+  is discarded instead of overwriting unrelated text.
+- **Localized** UI (English, Russian, Spanish) that follows your Obsidian language.
 
-Quick starting guide for new plugin devs:
+## Providers
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+| Provider | Type | Platform | Notes |
+| --- | --- | --- | --- |
+| Custom API | Cloud / self-hosted | Desktop + mobile | OpenAI-compatible, Anthropic, Google Gemini, OpenRouter, Groq, and similar — detected from the endpoint URL. |
+| Local models | Local | Desktop + mobile | Ollama and OpenAI-compatible local servers (LM Studio, etc.). |
+| Gemini CLI | Local CLI | Desktop only | Runs the Gemini CLI as a child process. |
+| Codex CLI | Local CLI | Desktop only | Runs the Codex CLI as a child process. |
 
-## Releasing new releases
+On mobile, CLI providers are hidden and the plugin falls back to an API/local provider
+automatically.
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+## Installation
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+### Manual (from a release)
 
-## Adding your plugin to the community plugin list
+1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release.
+2. Copy them into your vault at `<Vault>/.obsidian/plugins/ai-refiner/`.
+3. Reload Obsidian and enable **AI Refiner** under **Settings → Community plugins**.
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+### Build from source
 
-## How to use
-
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
-
-## Manually installing the plugin
-
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
-
-## Improve code quality with eslint
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
-
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
+```bash
+npm install
+npm run build
 ```
 
-If you have multiple URLs, you can also do:
+Then copy the produced `main.js`, `manifest.json`, and `styles.css` into the plugin
+folder as above, or use the deploy helper:
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
+```bash
+OBSIDIAN_PLUGIN_DIR="$HOME/Obsidian/.obsidian/plugins/ai-refiner" npm run deploy
 ```
 
-## API Documentation
+## Usage
 
-See https://docs.obsidian.md
+1. Select some text in a note.
+2. Trigger AI Refiner via the command palette (**AI refine selection**), the ribbon
+   icon, or your configured hotkey.
+3. Type an instruction (or pick a quick prompt) and press Enter.
+4. The refined text replaces your selection. Press Escape any time to cancel.
+
+## Settings
+
+- **Provider** — the backend used for refinement.
+- **Base instruction** — optional text prepended to every request.
+- **Shortcut** — capture and enable a custom hotkey.
+- **Voice input** — enable the microphone button and set the transcription endpoint.
+- **Quick prompts** — edit the built-in presets or add custom ones.
+- **Provider-specific fields**:
+  - CLI: executable path, arguments (JSON array), timeout.
+  - API / local: endpoint, model (auto-detectable), token (if required).
+
+## Network use and privacy
+
+This plugin makes network requests only to endpoints **you** configure. Nothing is sent
+anywhere by default, and there is no telemetry or analytics of any kind.
+
+What is sent, and where:
+
+- **API / local providers** — your selected text and the instruction go to the endpoint
+  URL you set. If the endpoint needs a key, it is sent as a request header
+  (`Authorization: Bearer …`, `x-api-key`, or `x-goog-api-key`).
+- **CLI providers** (desktop only) — your text and instruction are written to the CLI
+  process over stdin. Whatever that tool does with it (including its own network calls)
+  is governed by that tool, not this plugin.
+- **Voice input** (optional) — recorded audio is sent to the transcription endpoint you
+  configure.
+- **Model discovery** (optional) — pressing "detect models" queries the provider's models
+  endpoint.
+
+**Token storage:** API tokens are saved unencrypted in the plugin's `data.json`. A synced
+or backed-up vault propagates them, so do not share that file.
+
+## Mobile
+
+The plugin runs on mobile. CLI providers require Node/Electron APIs and are therefore
+desktop-only; on mobile, use an API or local-model provider.
+
+## Development
+
+```bash
+npm install
+npm run dev     # watch build
+npm run build   # type-check + production bundle
+npm run lint    # eslint (incl. obsidianmd rules)
+npm test        # vitest unit tests for pure logic
+```
+
+Source lives in `src/`, split by responsibility: `providers/` (backend strategies),
+`services/` (refine flow), `ui/` (floating input), `settings/`, `voice/`, `i18n/`, and
+`utils/`. Unit tests for the pure logic live in `tests/`.
+
+## Releasing
+
+Releases are automated by `.github/workflows/release.yml`. Bump the version (this updates
+`manifest.json` and `versions.json`), then push a tag **equal to the manifest version**
+(no `v` prefix):
+
+```bash
+npm version patch   # or minor / major
+git push && git push --tags
+```
+
+The workflow lints, tests, builds, and attaches `main.js`, `manifest.json`, and
+`styles.css` to a GitHub release.
+
+## License
+
+Released under the 0BSD license. See [LICENSE](LICENSE).

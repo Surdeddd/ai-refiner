@@ -30,5 +30,10 @@ export default tseslint.config(
 		"version-bump.mjs",
 		"versions.json",
 		"main.js",
+		// Node build/deploy scripts, not part of the plugin bundle.
+		"scripts",
+		// Dev-only files outside the plugin tsconfig project; validated by vitest/tsc.
+		"tests",
+		"vitest.config.mts",
 	]),
 );

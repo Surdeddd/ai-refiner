@@ -1,99 +1,116 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { Notice, Plugin, getLanguage } from "obsidian";
+import { registerCommands } from "./commands/registerCommands";
+import {
+	createTranslator,
+	mapPluginLanguageToSpeechLocale,
+	resolvePluginLanguage,
+	type TranslationKey,
+	type Translator,
+} from "./i18n";
+import { getFallbackProviderForCurrentPlatform } from "./providers/providerAvailability";
+import { RefineSelectionService } from "./services/RefineSelectionService";
+import { DEFAULT_SETTINGS, mergeSettings } from "./settings/defaults";
+import { AIRefinerSettingTab } from "./settings/settings-tab";
+import type { AIRefinerSettings } from "./settings/types";
+import { matchesHotkeyEvent, shouldIgnoreGlobalHotkeyTarget } from "./utils/hotkey";
+import { getActiveMarkdownEditor, hasSelectedText } from "./utils/editor";
 
-// Remember to rename these classes and interfaces!
+export default class AIRefinerPlugin extends Plugin {
+	settings: AIRefinerSettings = DEFAULT_SETTINGS;
+	private refineSelectionService: RefineSelectionService | null = null;
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-
-	async onload() {
+	async onload(): Promise<void> {
 		await this.loadSettings();
+		const supportedProvider = getFallbackProviderForCurrentPlatform(this.settings.activeProvider);
+		if (supportedProvider !== this.settings.activeProvider) {
+			this.settings.activeProvider = supportedProvider;
+			await this.saveSettings();
+		}
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+		this.refineSelectionService = new RefineSelectionService(
+			() => this.settings,
+			() => this.getTranslator(),
+			() => this.getVoiceLocale(),
+		);
+		registerCommands(this, this.refineSelectionService, this.getTranslator());
+
+		this.registerDomEvent(document, "keydown", (event: KeyboardEvent) => {
+			void this.handleConfiguredHotkey(event);
 		});
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
+		this.addRibbonIcon("sparkles", this.t("ribbon.aiRefineSelection"), async () => {
+			const activeEditor = getActiveMarkdownEditor(this.app);
+			if (!activeEditor) {
+				new Notice(this.t("notice.openNoteFirst"));
+				return;
 			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
+
+			if (!hasSelectedText(activeEditor.editor)) {
+				new Notice(this.t("notice.pleaseSelectTextFirst"));
+				return;
 			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			}
+			await this.refineSelectionService?.run(activeEditor.editor, "ribbon");
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
+		this.addSettingTab(new AIRefinerSettingTab(this.app, this));
 	}
 
-	onunload() {
+	onunload(): void {
+		this.refineSelectionService?.dispose();
+		this.refineSelectionService = null;
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
-	}
-
-	async saveSettings() {
+	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 	}
-}
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
+	private async loadSettings(): Promise<void> {
+		const savedData: unknown = await this.loadData();
+		this.settings = mergeSettings(savedData as Partial<AIRefinerSettings> | null | undefined);
 	}
 
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
+	private getTranslator(): Translator {
+		const language = resolvePluginLanguage(this.settings.languageMode, this.settings.language, getLanguage());
+		return createTranslator(language);
 	}
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+	private t(key: TranslationKey): string {
+		return this.getTranslator()(key);
+	}
+
+	private getVoiceLocale(): string {
+		const language = resolvePluginLanguage(this.settings.languageMode, this.settings.language, getLanguage());
+		return mapPluginLanguageToSpeechLocale(language);
+	}
+
+	private async handleConfiguredHotkey(event: KeyboardEvent): Promise<void> {
+		const { hotkey } = this.settings;
+		if (!hotkey.combo.trim()) {
+			return;
+		}
+
+		if (event.defaultPrevented || shouldIgnoreGlobalHotkeyTarget(event.target)) {
+			return;
+		}
+
+		if (!matchesHotkeyEvent(event, hotkey.combo)) {
+			return;
+		}
+
+		const activeEditor = getActiveMarkdownEditor(this.app);
+		if (!activeEditor) {
+			return;
+		}
+
+		event.preventDefault();
+		event.stopPropagation();
+
+		if (!hasSelectedText(activeEditor.editor)) {
+			new Notice(this.t("notice.pleaseSelectTextFirst"));
+			return;
+		}
+
+		await this.refineSelectionService?.run(activeEditor.editor, "hotkey");
 	}
 }

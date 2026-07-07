@@ -1,8 +1,250 @@
-/*
+.ai-refiner-floating-input {
+	position: absolute;
+	z-index: var(--layer-popover, 30);
+	width: min(520px, calc(100vw - 16px));
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 14px;
+	display: flex;
+	flex-direction: column;
+	background:
+		linear-gradient(
+			135deg,
+			color-mix(in srgb, var(--interactive-accent) 10%, transparent) 0%,
+			transparent 30%
+		),
+		var(--background-primary);
+	box-shadow:
+		0 18px 40px color-mix(in srgb, black 30%, transparent),
+		var(--shadow-s);
+	overflow: hidden;
+	animation: ai-refiner-fade-in 120ms ease-out;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.ai-refiner-floating-input--scoped {
+	z-index: 6;
+}
 
-If your plugin does not need CSS, delete this file.
+.ai-refiner-floating-mount {
+	position: relative;
+}
 
-*/
+.ai-refiner-floating-input__header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: color-mix(in srgb, var(--background-secondary) 75%, transparent);
+}
+
+.ai-refiner-floating-input__title {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.ai-refiner-floating-input__hint {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.ai-refiner-floating-input__meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.ai-refiner-floating-input__body {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 12px;
+	overflow: auto;
+}
+
+.ai-refiner-floating-input__preset-title {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.ai-refiner-floating-input__preset-wrap {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.ai-refiner-floating-input__preset {
+	padding: 4px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--background-secondary) 70%, transparent);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}
+
+.ai-refiner-floating-input__preset:hover {
+	background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary));
+	color: var(--text-normal);
+}
+
+.ai-refiner-floating-input__preset.is-active {
+	border-color: color-mix(in srgb, var(--interactive-accent) 60%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-secondary));
+	color: var(--text-normal);
+}
+
+.ai-refiner-floating-input__instruction {
+	width: 100%;
+	min-height: 74px;
+	resize: vertical;
+	line-height: 1.4;
+	padding: 8px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.ai-refiner-floating-input__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.ai-refiner-floating-input__voice {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	padding: 4px 10px;
+	background: color-mix(in srgb, var(--background-secondary) 85%, transparent);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.2;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.ai-refiner-floating-input__voice:hover {
+	color: var(--text-normal);
+	border-color: color-mix(in srgb, var(--interactive-accent) 50%, var(--background-modifier-border));
+}
+
+.ai-refiner-floating-input__voice.is-listening {
+	color: var(--text-on-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 88%, black 8%);
+	border-color: color-mix(in srgb, var(--interactive-accent) 66%, var(--background-modifier-border));
+}
+
+.ai-refiner-floating-input__voice.is-transcribing {
+	color: var(--text-normal);
+	background: color-mix(in srgb, var(--background-secondary) 88%, var(--interactive-accent) 6%);
+	border-color: color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
+}
+
+.ai-refiner-floating-input__button {
+	min-width: 78px;
+	padding: 6px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+
+.ai-refiner-floating-input__button--ghost {
+	background: transparent;
+}
+
+.ai-refiner-floating-input__button--primary {
+	border-color: color-mix(in srgb, var(--interactive-accent) 50%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-secondary));
+}
+
+.ai-refiner-settings-prompts {
+	margin-top: 12px;
+}
+
+.ai-refiner-prompt-group-title {
+	margin-top: 10px;
+	margin-bottom: 6px;
+	font-size: var(--font-ui-smaller);
+	font-weight: 700;
+	color: var(--text-muted);
+}
+
+.ai-refiner-prompt-empty {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	padding: 4px 0 8px;
+}
+
+.ai-refiner-prompt-editor {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 86%, transparent);
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--background-primary) 92%, var(--background-secondary));
+	margin-bottom: 8px;
+}
+
+.ai-refiner-prompt-editor__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.ai-refiner-prompt-editor__title {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.ai-refiner-prompt-editor__tag {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	padding: 2px 8px;
+}
+
+.ai-refiner-prompt-editor__hidden {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.ai-refiner-prompt-editor__label,
+.ai-refiner-prompt-editor__instruction {
+	width: 100%;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 8px 10px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.ai-refiner-prompt-editor__instruction {
+	resize: vertical;
+	min-height: 74px;
+}
+
+.ai-refiner-prompt-editor__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+@keyframes ai-refiner-fade-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px) scale(0.985);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
