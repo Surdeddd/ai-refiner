@@ -22,6 +22,13 @@ import {
 	buildOpenAiCompatibleHeaders,
 	buildOpenAiCompatiblePayload,
 } from "./payloads";
+import {
+	SseParser,
+	canStreamEndpoint,
+	extractAnthropicStreamDelta,
+	extractOpenAiStreamDelta,
+	streamText,
+} from "./streaming";
 
 type EndpointKind = "openai-compatible" | "anthropic" | "google";
 
@@ -47,11 +54,11 @@ export class HttpApiProvider implements IAIProvider {
 
 		switch (endpointKind) {
 			case "anthropic":
-				return this.generateAnthropic(endpointUrl, model, apiToken, text, instruction, options?.signal);
+				return this.generateAnthropic(endpointUrl, model, apiToken, text, instruction, options);
 			case "google":
 				return this.generateGoogle(endpointUrl, model, apiToken, text, instruction, options?.signal);
 			case "openai-compatible":
-				return this.generateOpenAiCompatible(endpointUrl, model, apiToken, text, instruction, options?.signal);
+				return this.generateOpenAiCompatible(endpointUrl, model, apiToken, text, instruction, options);
 			default:
 				return assertNever(endpointKind);
 		}
@@ -63,16 +70,39 @@ export class HttpApiProvider implements IAIProvider {
 		apiToken: string,
 		text: string,
 		instruction: string,
-		signal?: AbortSignal,
+		options?: ProviderGenerateOptions,
 	): Promise<string> {
+		const headers = buildOpenAiCompatibleHeaders(apiToken, { isOpenRouter: isOpenRouterEndpoint(endpointUrl) });
+		const onChunk = options?.onChunk;
+
+		if (onChunk && await canStreamEndpoint(endpointUrl, { isPrivate: isPrivateHost(endpointUrl.hostname) })) {
+			const parser = new SseParser();
+			const streamed = await streamText({
+				url: endpointUrl.toString(),
+				headers,
+				body: JSON.stringify({ ...buildOpenAiCompatiblePayload(model, text, instruction), stream: true }),
+				signal: options.signal,
+				onChunk,
+				parseChunk: (chunk) =>
+					parser.push(chunk)
+						.filter((event) => event !== "[DONE]")
+						.map((event) => extractOpenAiStreamDelta(parseJson(event))),
+			});
+			const trimmedStream = streamed.trim();
+			if (!trimmedStream) {
+				throw new Error(`${getProviderLabel()} returned empty response content.`);
+			}
+			return trimmedStream;
+		}
+
 		const response = await requestUrlWithSignal({
 			url: endpointUrl.toString(),
 			method: "POST",
 			contentType: "application/json",
-			headers: buildOpenAiCompatibleHeaders(apiToken, { isOpenRouter: isOpenRouterEndpoint(endpointUrl) }),
+			headers,
 			body: JSON.stringify(buildOpenAiCompatiblePayload(model, text, instruction)),
 			throw: false,
-		}, signal);
+		}, options?.signal);
 
 		const payload = parseJson(response.text);
 		if (response.status >= 400) {
@@ -93,8 +123,32 @@ export class HttpApiProvider implements IAIProvider {
 		apiToken: string,
 		text: string,
 		instruction: string,
-		signal?: AbortSignal,
+		options?: ProviderGenerateOptions,
 	): Promise<string> {
+		const onChunk = options?.onChunk;
+
+		if (onChunk && await canStreamEndpoint(endpointUrl, { isPrivate: isPrivateHost(endpointUrl.hostname) })) {
+			const parser = new SseParser();
+			const streamed = await streamText({
+				url: endpointUrl.toString(),
+				headers: {
+					...buildAnthropicHeaders(apiToken),
+					// Anthropic requires this opt-in for browser-context (CORS) calls.
+					"anthropic-dangerous-direct-browser-access": "true",
+				},
+				body: JSON.stringify({ ...buildAnthropicPayload(model, text, instruction), stream: true }),
+				signal: options.signal,
+				onChunk,
+				parseChunk: (chunk) =>
+					parser.push(chunk).map((event) => extractAnthropicStreamDelta(parseJson(event))),
+			});
+			const trimmedStream = streamed.trim();
+			if (!trimmedStream) {
+				throw new Error("Anthropic API returned empty response content.");
+			}
+			return trimmedStream;
+		}
+
 		const response = await requestUrlWithSignal({
 			url: endpointUrl.toString(),
 			method: "POST",
@@ -102,7 +156,7 @@ export class HttpApiProvider implements IAIProvider {
 			headers: buildAnthropicHeaders(apiToken),
 			body: JSON.stringify(buildAnthropicPayload(model, text, instruction)),
 			throw: false,
-		}, signal);
+		}, options?.signal);
 
 		const payload = parseJson(response.text);
 		if (response.status >= 400) {

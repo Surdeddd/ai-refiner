@@ -2,6 +2,7 @@ import { requestUrl } from "obsidian";
 import type { OllamaLocalConfig } from "../settings/types";
 import {
     extractNamedValues,
+    isPrivateHost,
     extractTextContent,
     inferOpenAiModelsUrl,
     isRecord,
@@ -12,6 +13,14 @@ import {
 import type { IAIProvider, ProviderGenerateOptions } from "./IAIProvider";
 import { ProviderAbortError, throwIfAborted } from "./IAIProvider";
 import { buildOllamaGeneratePayload, buildOpenAiLocalPayload } from "./payloads";
+import {
+	NdjsonParser,
+	SseParser,
+	canStreamEndpoint,
+	extractOllamaStreamDelta,
+	extractOpenAiStreamDelta,
+	streamText,
+} from "./streaming";
 
 interface OllamaGenerateResponse {
 	response?: string;
@@ -37,12 +46,12 @@ export class OllamaLocalProvider implements IAIProvider {
 			run: () => Promise<string>;
 		}> = primaryKind === "ollama"
 			? [
-				{ label: "Ollama", run: () => generateWithOllama(endpoint, model, text, instruction, options?.signal) },
-				{ label: "OpenAI-compatible local", run: () => generateWithOpenAiLocal(endpoint, model, text, instruction, options?.signal) },
+				{ label: "Ollama", run: () => generateWithOllama(endpoint, model, text, instruction, options) },
+				{ label: "OpenAI-compatible local", run: () => generateWithOpenAiLocal(endpoint, model, text, instruction, options) },
 			]
 			: [
-				{ label: "OpenAI-compatible local", run: () => generateWithOpenAiLocal(endpoint, model, text, instruction, options?.signal) },
-				{ label: "Ollama", run: () => generateWithOllama(endpoint, model, text, instruction, options?.signal) },
+				{ label: "OpenAI-compatible local", run: () => generateWithOpenAiLocal(endpoint, model, text, instruction, options) },
+				{ label: "Ollama", run: () => generateWithOllama(endpoint, model, text, instruction, options) },
 			];
 
 		const errors: string[] = [];
@@ -221,15 +230,37 @@ async function generateWithOllama(
 	model: string,
 	text: string,
 	instruction: string,
-	signal?: AbortSignal,
+	options?: ProviderGenerateOptions,
 ): Promise<string> {
+	const url = buildOllamaGenerateUrl(endpoint);
+	const onChunk = options?.onChunk;
+
+	// Local servers stream only when the origin answered the one-time CORS probe —
+	// e.g. Ollama needs OLLAMA_ORIGINS to include app://obsidian.md.
+	if (onChunk && await canStreamEndpoint(url, { isPrivate: isPrivateHost(url.hostname) })) {
+		const parser = new NdjsonParser();
+		const streamed = await streamText({
+			url: url.toString(),
+			headers: {},
+			body: JSON.stringify({ ...buildOllamaGeneratePayload(model, text, instruction), stream: true }),
+			signal: options.signal,
+			onChunk,
+			parseChunk: (chunk) => parser.push(chunk).map(extractOllamaStreamDelta),
+		});
+		const trimmedStream = streamed.trim();
+		if (!trimmedStream) {
+			throw new Error("Ollama returned empty output.");
+		}
+		return trimmedStream;
+	}
+
 	const response = await requestUrlWithSignal({
-		url: buildOllamaGenerateUrl(endpoint).toString(),
+		url: url.toString(),
 		method: "POST",
 		contentType: "application/json",
 		body: JSON.stringify(buildOllamaGeneratePayload(model, text, instruction)),
 		throw: false,
-	}, signal);
+	}, options?.signal);
 
 	const payload = parseJson(response.text);
 	if (response.status >= 400) {
@@ -249,15 +280,37 @@ async function generateWithOpenAiLocal(
 	model: string,
 	text: string,
 	instruction: string,
-	signal?: AbortSignal,
+	options?: ProviderGenerateOptions,
 ): Promise<string> {
+	const onChunk = options?.onChunk;
+
+	if (onChunk && await canStreamEndpoint(endpoint, { isPrivate: isPrivateHost(endpoint.hostname) })) {
+		const parser = new SseParser();
+		const streamed = await streamText({
+			url: endpoint.toString(),
+			headers: {},
+			body: JSON.stringify({ ...buildOpenAiLocalPayload(model, text, instruction), stream: true }),
+			signal: options.signal,
+			onChunk,
+			parseChunk: (chunk) =>
+				parser.push(chunk)
+					.filter((event) => event !== "[DONE]")
+					.map((event) => extractOpenAiStreamDelta(parseJson(event))),
+		});
+		const trimmedStream = streamed.trim();
+		if (!trimmedStream) {
+			throw new Error("OpenAI-compatible local server returned empty output.");
+		}
+		return trimmedStream;
+	}
+
 	const response = await requestUrlWithSignal({
 		url: endpoint.toString(),
 		method: "POST",
 		contentType: "application/json",
 		body: JSON.stringify(buildOpenAiLocalPayload(model, text, instruction)),
 		throw: false,
-	}, signal);
+	}, options?.signal);
 
 	const payload = parseJson(response.text);
 	if (response.status >= 400) {

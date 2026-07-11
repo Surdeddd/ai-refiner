@@ -76,7 +76,7 @@ export class CliProcessProvider implements IAIProvider {
 		let notFoundExecutables: string[] = [];
 		for (const executablePath of executableCandidates) {
 			try {
-				return await this.runCommand(executablePath, prompt, options?.signal);
+				return await this.runCommand(executablePath, prompt, options?.signal, options?.onChunk);
 			} catch (error: unknown) {
 				if (error instanceof CommandNotFoundError) {
 					notFoundExecutables.push(error.executablePath);
@@ -93,7 +93,12 @@ export class CliProcessProvider implements IAIProvider {
 		);
 	}
 
-	private runCommand(executablePath: string, prompt: string, abortSignal?: AbortSignal): Promise<string> {
+	private runCommand(
+		executablePath: string,
+		prompt: string,
+		abortSignal?: AbortSignal,
+		onChunk?: (delta: string) => void,
+	): Promise<string> {
 		const spawnProcess = this.options.spawnProcess ?? getSpawnProcess(this.options.displayName);
 		const target = buildSpawnTarget(executablePath, this.config.args);
 
@@ -161,7 +166,11 @@ export class CliProcessProvider implements IAIProvider {
 			});
 
 			child.stdout.on("data", (chunk: Uint8Array | string) => {
-				stdout += chunk.toString();
+				const delta = chunk.toString();
+				stdout += delta;
+				if (!settled && delta) {
+					onChunk?.(delta);
+				}
 			});
 
 			child.stderr.on("data", (chunk: Uint8Array | string) => {

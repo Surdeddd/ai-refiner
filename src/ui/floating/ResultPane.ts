@@ -51,6 +51,12 @@ export class ResultPane {
 		this.containerEl.append(titleEl, this.textEl, actionsEl);
 	}
 
+	// Incremental text while a response streams in; replaced by the final diff
+	// render (setContent) once the request settles.
+	setStreamingText(text: string): void {
+		this.textEl.setText(text);
+	}
+
 	setContent(originalText: string, refinedText: string): void {
 		this.textEl.empty();
 		const segments = diffWords(originalText, refinedText);

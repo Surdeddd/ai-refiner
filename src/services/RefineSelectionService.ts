@@ -98,8 +98,8 @@ export class RefineSelectionService {
 			presets: quickPrompts,
 			resultMode: settings.resultMode,
 			originalText: snapshot.text,
-			onSubmit: (instruction: string, signal: AbortSignal) =>
-				this.generateRefinedText(snapshot, instruction, signal),
+			onSubmit: (instruction: string, signal: AbortSignal, onChunk?: (delta: string) => void) =>
+				this.generateRefinedText(snapshot, instruction, signal, onChunk),
 			onApply: (refinedText: string) => {
 				replaceSnapshotSelection(editor, snapshot, refinedText, this.getTranslator());
 			},
@@ -138,6 +138,7 @@ export class RefineSelectionService {
 		snapshot: SelectionSnapshot,
 		instruction: string,
 		signal: AbortSignal,
+		onChunk?: (delta: string) => void,
 	): Promise<string> {
 		const trimmedInstruction = instruction.trim();
 		if (!trimmedInstruction) {
@@ -150,7 +151,7 @@ export class RefineSelectionService {
 		// desktop CLI choice silently routes to an API provider on mobile.
 		const provider = this.providerFactory.create(settings);
 		const finalInstruction = buildFinalInstruction(settings.prompt.prependInstruction, trimmedInstruction);
-		const refinedText = await provider.generate(snapshot.text, finalInstruction, { signal });
+		const refinedText = await provider.generate(snapshot.text, finalInstruction, { signal, onChunk });
 		throwIfAborted(signal);
 		if (!refinedText.trim()) {
 			throw new Error(this.getTranslator()("error.providerReturnedEmptyOutput"));

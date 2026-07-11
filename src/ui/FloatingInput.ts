@@ -27,8 +27,9 @@ interface FloatingInputOptions {
 	resultMode: ResultMode;
 	// The snapshotted selection, used to render the preview diff.
 	originalText: string;
-	// Produces the refined text; MUST NOT touch the editor.
-	onSubmit: (instruction: string, signal: AbortSignal) => Promise<string>;
+	// Produces the refined text; MUST NOT touch the editor. onChunk (when passed)
+	// receives incremental output for the live preview.
+	onSubmit: (instruction: string, signal: AbortSignal, onChunk?: (delta: string) => void) => Promise<string>;
 	// Writes the refined text into the editor; throws (e.g. selection changed)
 	// without closing the panel, so the result is never silently lost.
 	onApply: (refinedText: string) => void;
@@ -309,8 +310,23 @@ export class FloatingInput {
 		const abortController = new AbortController();
 		this.activeSubmitAbortController = abortController;
 		let refinedText: string | null = null;
+
+		// Live streaming preview: only meaningful in preview mode, where the result
+		// pane exists to show it. Chunks arriving after abort/close are ignored.
+		let streamedText = "";
+		const onChunk = this.options.resultMode === "preview"
+			? (delta: string): void => {
+				if (abortController.signal.aborted || !this.isOpen) {
+					return;
+				}
+				streamedText += delta;
+				this.resultPane.setStreamingText(streamedText);
+				this.resultPane.show();
+			}
+			: undefined;
+
 		try {
-			const result = await this.options.onSubmit(instruction, abortController.signal);
+			const result = await this.options.onSubmit(instruction, abortController.signal, onChunk);
 			if (!abortController.signal.aborted) {
 				refinedText = result;
 			}
@@ -325,6 +341,8 @@ export class FloatingInput {
 			if (this.isOpen) {
 				this.setSubmittingState(false);
 				if (refinedText === null) {
+					// Failed/cancelled: drop any partial streamed output.
+					this.resultPane.hide();
 					this.inputEl.focus();
 				}
 			}

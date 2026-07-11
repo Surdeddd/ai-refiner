@@ -19,9 +19,16 @@ nothing leaves your machine unless you configure it to.
 - **Three ways to trigger**: command palette, ribbon icon, or a custom hotkey.
 - **Optional voice input** — dictate your instruction via a Whisper-compatible
   transcription endpoint (off by default).
+- **Streaming preview** — with preview mode on, the result streams into the panel
+  live. Streaming works out of the box for OpenAI, Anthropic, OpenRouter, Groq,
+  Mistral, DeepSeek, and xAI endpoints; local servers (Ollama, LM Studio) stream when
+  they allow Obsidian's origin (for Ollama set `OLLAMA_ORIGINS=app://obsidian.md*`),
+  otherwise they transparently fall back to buffered responses.
 - **In-flight cancel** — press Escape to cancel. CLI providers are terminated for
-  real (SIGTERM); for HTTP providers the result is discarded — Obsidian's network API
-  cannot abort an already-sent request, so the server may still finish processing it.
+  real (SIGTERM), and streamed HTTP requests are truly aborted mid-flight. Only
+  buffered (non-streaming) HTTP requests merely discard the result — Obsidian's
+  network API cannot abort an already-sent request, so the server may still finish
+  processing it.
 - **Safe replacement** — if the document changes while a request runs, the stale result
   is discarded instead of overwriting unrelated text.
 - **Localized** UI (English, Russian, Spanish) that follows your Obsidian language.
