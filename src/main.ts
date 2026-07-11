@@ -7,9 +7,9 @@ import {
 	type TranslationKey,
 	type Translator,
 } from "./i18n";
-import { getFallbackProviderForCurrentPlatform } from "./providers/providerAvailability";
 import { RefineSelectionService } from "./services/RefineSelectionService";
 import { DEFAULT_SETTINGS, mergeSettings } from "./settings/defaults";
+import { PluginSecretStore } from "./settings/secretStore";
 import { AIRefinerSettingTab } from "./settings/settings-tab";
 import type { AIRefinerSettings } from "./settings/types";
 import { matchesHotkeyEvent, shouldIgnoreGlobalHotkeyTarget } from "./utils/hotkey";
@@ -18,14 +18,11 @@ import { getActiveMarkdownEditor, hasSelectedText } from "./utils/editor";
 export default class AIRefinerPlugin extends Plugin {
 	settings: AIRefinerSettings = DEFAULT_SETTINGS;
 	private refineSelectionService: RefineSelectionService | null = null;
+	private secretStore: PluginSecretStore | null = null;
 
 	async onload(): Promise<void> {
+		this.secretStore = new PluginSecretStore(this.app);
 		await this.loadSettings();
-		const supportedProvider = getFallbackProviderForCurrentPlatform(this.settings.activeProvider);
-		if (supportedProvider !== this.settings.activeProvider) {
-			this.settings.activeProvider = supportedProvider;
-			await this.saveSettings();
-		}
 
 		this.refineSelectionService = new RefineSelectionService(
 			() => this.settings,
@@ -62,12 +59,21 @@ export default class AIRefinerPlugin extends Plugin {
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
+		// On Obsidian 1.11.4+ tokens go to SecretStorage and are blanked in
+		// data.json; older versions persist them as before.
+		const persisted = this.secretStore?.prepareForPersistence(this.settings) ?? this.settings;
+		await this.saveData(persisted);
 	}
 
 	private async loadSettings(): Promise<void> {
 		const savedData: unknown = await this.loadData();
 		this.settings = mergeSettings(savedData as Partial<AIRefinerSettings> | null | undefined);
+
+		// Hydrate token values from SecretStorage; when data.json still carries
+		// plaintext tokens, they are migrated in and the file is rewritten once.
+		if (this.secretStore?.hydrateAndMigrate(this.settings)) {
+			await this.saveSettings();
+		}
 	}
 
 	private getTranslator(): Translator {

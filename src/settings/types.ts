@@ -1,6 +1,9 @@
 import type { PluginLanguage } from "../i18n";
 
 export type LanguageMode = "auto" | "manual";
+// "preview": show the result with Apply/Retry/Copy/Discard before touching the note;
+// "replace": overwrite the selection as soon as the provider answers.
+export type ResultMode = "preview" | "replace";
 export type CliProviderId = "gemini-cli" | "codex-cli";
 export type LocalProviderId = "ollama-local";
 export type ApiProviderId = "custom-api";
@@ -61,6 +64,7 @@ export interface AIRefinerSettings {
 	schemaVersion: number;
 	languageMode: LanguageMode;
 	language: PluginLanguage;
+	resultMode: ResultMode;
 	activeProvider: ProviderId;
 	prompt: PromptConfig;
 	quickPrompts: QuickPromptsConfig;

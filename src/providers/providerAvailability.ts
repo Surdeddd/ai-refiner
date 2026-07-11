@@ -24,12 +24,15 @@ export function getSupportedProvidersForCurrentPlatform(
 	return providerOrder.filter((providerId) => isProviderSupportedOnCurrentPlatform(providerId));
 }
 
-export function getFallbackProviderForCurrentPlatform(
-	currentProvider: ProviderId,
+// Resolves the provider actually used on this platform WITHOUT mutating the stored
+// preference: a desktop CLI choice must survive a vault round-trip through mobile,
+// so callers compute this per use instead of persisting the fallback.
+export function getEffectiveProviderForCurrentPlatform(
+	storedProvider: ProviderId,
 	providerOrder: ProviderId[] = PROVIDER_ORDER,
 ): ProviderId {
-	if (isProviderSupportedOnCurrentPlatform(currentProvider)) {
-		return currentProvider;
+	if (isProviderSupportedOnCurrentPlatform(storedProvider)) {
+		return storedProvider;
 	}
 
 	const supportedProviderSet = new Set(getSupportedProvidersForCurrentPlatform(providerOrder));

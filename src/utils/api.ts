@@ -1,7 +1,12 @@
 import { requestUrl } from "obsidian";
 import { ProviderAbortError } from "../providers/IAIProvider";
 
-export async function requestUrlWithAbort(
+// HONEST CANCELLATION SEMANTICS: Obsidian's requestUrl exposes no way to abort the
+// underlying HTTP request. On abort we stop WAITING and discard the eventual result —
+// the request itself may still complete on the network/server side. Only CLI providers
+// (child-process SIGTERM) truly terminate work. A pre-aborted signal short-circuits
+// BEFORE the request is issued, so cancellation never causes extra requests.
+export async function requestUrlWithSignal(
 	params: Parameters<typeof requestUrl>[0],
 	signal?: AbortSignal,
 ) {
@@ -14,10 +19,13 @@ export async function requestUrlWithAbort(
 		return requestPromise;
 	}
 
-	return await raceWithAbort(requestPromise, signal);
+	return await detachOnAbort(requestPromise, signal);
 }
 
-export function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+// Rejects with ProviderAbortError as soon as the signal fires, detaching from (not
+// cancelling) the given promise. Handlers stay attached to the original promise, so a
+// late settlement after abort is swallowed instead of surfacing as an unhandled rejection.
+export function detachOnAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 	if (signal.aborted) {
 		return Promise.reject(new ProviderAbortError());
 	}

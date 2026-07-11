@@ -1,29 +1,20 @@
 import { Notice } from "obsidian";
 import type { Translator } from "../i18n";
-import { ProviderAbortError } from "../providers/IAIProvider";
-import type { QuickPromptItem } from "../settings/types";
-import { transcribeAudioViaApi } from "../voice/SttApiTranscriber";
-import { VoiceRecorder } from "../voice/VoiceRecorder";
+import type { QuickPromptItem, ResultMode } from "../settings/types";
+import { getErrorMessage, isAbortError } from "./floating/errors";
+import { panelWindow } from "./floating/dom";
+import {
+	FLOATING_TRACK_INTERVAL_MS,
+	computePanelPlacement,
+	getViewportBounds,
+	toMountCoordinates,
+	type FloatingAnchor,
+	type FloatingBounds,
+} from "./floating/positioning";
+import { ResultPane } from "./floating/ResultPane";
+import { VoicePanelIntegration, type VoiceInputOptions } from "./floating/VoicePanelIntegration";
 
-const FLOATING_TRACK_INTERVAL_MS = 120;
-const FLOATING_MIN_WIDTH = 280;
-const FLOATING_MAX_WIDTH = 520;
-const FLOATING_MIN_HEIGHT = 190;
-const FLOATING_EDGE_PADDING = 8;
-const FLOATING_ANCHOR_OFFSET = 10;
-
-export interface FloatingAnchor {
-	left: number;
-	top: number;
-	bottom: number;
-}
-
-export interface FloatingBounds {
-	left: number;
-	right: number;
-	top: number;
-	bottom: number;
-}
+export type { FloatingAnchor, FloatingBounds } from "./floating/positioning";
 
 interface FloatingInputOptions {
 	anchor: FloatingAnchor;
@@ -33,25 +24,27 @@ interface FloatingInputOptions {
 	t: Translator;
 	voiceInput?: VoiceInputOptions;
 	presets?: QuickPromptItem[];
-	onSubmit: (instruction: string, signal: AbortSignal) => Promise<void>;
+	resultMode: ResultMode;
+	// The snapshotted selection, used to render the preview diff.
+	originalText: string;
+	// Produces the refined text; MUST NOT touch the editor.
+	onSubmit: (instruction: string, signal: AbortSignal) => Promise<string>;
+	// Writes the refined text into the editor; throws (e.g. selection changed)
+	// without closing the panel, so the result is never silently lost.
+	onApply: (refinedText: string) => void;
 	onClose?: () => void;
 }
 
-interface VoiceInputOptions {
-	enabled: boolean;
-	languageCode: string;
-	apiEndpoint: string;
-	apiModel: string;
-	apiToken: string;
-}
-
+// Presentation + submit state for the floating prompt. Placement math lives in
+// floating/positioning.ts and everything voice in floating/VoicePanelIntegration.ts.
 export class FloatingInput {
 	private readonly containerEl: HTMLDivElement;
 	private readonly mountEl: HTMLElement;
 	private readonly inputEl: HTMLTextAreaElement;
 	private readonly runButtonEl: HTMLButtonElement;
 	private readonly cancelButtonEl: HTMLButtonElement;
-	private readonly voiceButtonEl: HTMLButtonElement | null;
+	private readonly voice: VoicePanelIntegration | null;
+	private readonly resultPane: ResultPane;
 	private readonly presetButtons = new Map<string, HTMLButtonElement>();
 	private readonly presets: QuickPromptItem[];
 	private currentAnchor: FloatingAnchor;
@@ -59,11 +52,9 @@ export class FloatingInput {
 	private trackIntervalId: number | null = null;
 	private isOpen = false;
 	private isSubmitting = false;
-	private isTranscribing = false;
-	private voiceRecorder: VoiceRecorder | null = null;
 	private patchedMountClass = false;
 	private activeSubmitAbortController: AbortController | null = null;
-	private activeTranscribeAbortController: AbortController | null = null;
+	private pendingResult: string | null = null;
 
 	private readonly handlePositionChange = (): void => {
 		if (!this.isOpen) {
@@ -119,12 +110,7 @@ export class FloatingInput {
 			this.cancelActiveSubmit();
 			return;
 		}
-		if (this.isTranscribing) {
-			this.cancelActiveTranscribe();
-			return;
-		}
-		if (this.voiceRecorder?.isRecording) {
-			this.voiceRecorder.stop(true);
+		if (this.voice?.handleEscape()) {
 			return;
 		}
 		this.close();
@@ -132,59 +118,61 @@ export class FloatingInput {
 
 	constructor(private readonly options: FloatingInputOptions) {
 		const t = options.t;
+		const win = panelWindow();
 		this.currentAnchor = options.anchor;
 		this.mountEl = options.mountEl ?? activeDocument.body;
 		this.presets = sanitizePresets(options.presets ?? []);
 
-		this.containerEl = activeDocument.createElement("div");
+		this.containerEl = win.createDiv();
 		this.containerEl.className = "ai-refiner-floating-input";
 		if (this.mountEl !== activeDocument.body) {
 			this.containerEl.classList.add("ai-refiner-floating-input--scoped");
 		}
 
-		const headerEl = activeDocument.createElement("div");
+		const headerEl = win.createDiv();
 		headerEl.className = "ai-refiner-floating-input__header";
 
-		const titleEl = activeDocument.createElement("div");
+		const titleEl = win.createDiv();
 		titleEl.className = "ai-refiner-floating-input__title";
 		titleEl.textContent = t("floating.title");
 
-		const headerMetaEl = activeDocument.createElement("div");
+		const headerMetaEl = win.createDiv();
 		headerMetaEl.className = "ai-refiner-floating-input__meta";
 
-		const hintEl = activeDocument.createElement("div");
+		const hintEl = win.createDiv();
 		hintEl.className = "ai-refiner-floating-input__hint";
 		hintEl.textContent = t("floating.hint");
 		headerMetaEl.appendChild(hintEl);
 
-		this.voiceButtonEl = options.voiceInput?.enabled
-			? this.createVoiceButton(t, options.voiceInput.languageCode)
-			: null;
-		if (this.voiceButtonEl) {
-			this.voiceRecorder = new VoiceRecorder(t, {
-				onRecordingStateChange: () => this.syncVoiceUi(),
-				onResult: (audio) => this.transcribeRecordedAudio(audio),
-				onNotice: (message) => {
-					new Notice(message);
+		this.voice = options.voiceInput?.enabled
+			? new VoicePanelIntegration(
+				{
+					t,
+					isPanelOpen: () => this.isOpen,
+					isSubmitting: () => this.isSubmitting,
+					appendTranscript: (transcript) => this.appendTranscript(transcript),
 				},
-			});
-			headerMetaEl.appendChild(this.voiceButtonEl);
+				options.voiceInput,
+			)
+			: null;
+		if (this.voice) {
+			headerMetaEl.appendChild(this.voice.buttonEl);
 		}
 
 		headerEl.append(titleEl, headerMetaEl);
 
-		const bodyEl = activeDocument.createElement("div");
+		const bodyEl = win.createDiv();
 		bodyEl.className = "ai-refiner-floating-input__body";
 
 		if (this.presets.length > 0) {
-			const presetTitleEl = activeDocument.createElement("div");
+			const presetTitleEl = win.createDiv();
 			presetTitleEl.className = "ai-refiner-floating-input__preset-title";
 			presetTitleEl.textContent = t("floating.quickPrompts");
 
-			const presetWrapEl = activeDocument.createElement("div");
+			const presetWrapEl = win.createDiv();
 			presetWrapEl.className = "ai-refiner-floating-input__preset-wrap";
 			for (const preset of this.presets) {
-				const presetButton = activeDocument.createElement("button");
+				const presetButton = win.createEl("button");
 				presetButton.type = "button";
 				presetButton.className = "ai-refiner-floating-input__preset";
 				presetButton.textContent = preset.label;
@@ -197,16 +185,16 @@ export class FloatingInput {
 			bodyEl.append(presetTitleEl, presetWrapEl);
 		}
 
-		this.inputEl = activeDocument.createElement("textarea");
+		this.inputEl = win.createEl("textarea");
 		this.inputEl.className = "ai-refiner-floating-input__instruction";
 		this.inputEl.placeholder = t("floating.placeholder");
 		this.inputEl.rows = 3;
 		this.inputEl.addEventListener("keydown", this.handleInputKeyDown);
 
-		const actionsEl = activeDocument.createElement("div");
+		const actionsEl = win.createDiv();
 		actionsEl.className = "ai-refiner-floating-input__actions";
 
-		this.cancelButtonEl = activeDocument.createElement("button");
+		this.cancelButtonEl = win.createEl("button");
 		this.cancelButtonEl.type = "button";
 		this.cancelButtonEl.className = "ai-refiner-floating-input__button ai-refiner-floating-input__button--ghost";
 		this.cancelButtonEl.textContent = t("floating.cancel");
@@ -218,7 +206,7 @@ export class FloatingInput {
 			this.close();
 		});
 
-		this.runButtonEl = activeDocument.createElement("button");
+		this.runButtonEl = win.createEl("button");
 		this.runButtonEl.type = "button";
 		this.runButtonEl.className = "ai-refiner-floating-input__button ai-refiner-floating-input__button--primary";
 		this.runButtonEl.textContent = t("floating.run");
@@ -227,7 +215,19 @@ export class FloatingInput {
 		});
 
 		actionsEl.append(this.cancelButtonEl, this.runButtonEl);
-		bodyEl.append(this.inputEl, actionsEl);
+		this.resultPane = new ResultPane(t, {
+			onApply: () => this.applyPendingResult(),
+			onRetry: () => {
+				this.resultPane.hide();
+				this.pendingResult = null;
+				void this.submit();
+			},
+			onCopy: () => {
+				void this.copyPendingResult();
+			},
+			onDiscard: () => this.close(),
+		});
+		bodyEl.append(this.inputEl, actionsEl, this.resultPane.containerEl);
 		this.containerEl.append(headerEl, bodyEl);
 	}
 
@@ -266,10 +266,6 @@ export class FloatingInput {
 			this.cancelActiveSubmit();
 		}
 
-		// A voice transcription may still be in flight; abort it so its late
-		// resolution can't write into a detached textarea or pop a stray Notice.
-		this.cancelActiveTranscribe();
-
 		this.isOpen = false;
 		window.removeEventListener("resize", this.handlePositionChange);
 		window.removeEventListener("scroll", this.handlePositionChange, true);
@@ -281,7 +277,9 @@ export class FloatingInput {
 			this.trackIntervalId = null;
 		}
 
-		this.voiceRecorder?.dispose();
+		// Stops recording, aborts an in-flight transcription (so its late resolution
+		// can't write into a detached textarea), and releases the microphone.
+		this.voice?.dispose();
 		this.containerEl.remove();
 		this.restoreMountElement();
 		this.options.onClose?.();
@@ -310,11 +308,11 @@ export class FloatingInput {
 		this.setSubmittingState(true);
 		const abortController = new AbortController();
 		this.activeSubmitAbortController = abortController;
-		let shouldClose = false;
+		let refinedText: string | null = null;
 		try {
-			await this.options.onSubmit(instruction, abortController.signal);
+			const result = await this.options.onSubmit(instruction, abortController.signal);
 			if (!abortController.signal.aborted) {
-				shouldClose = true;
+				refinedText = result;
 			}
 		} catch (error: unknown) {
 			if (!isAbortError(error)) {
@@ -326,14 +324,59 @@ export class FloatingInput {
 			}
 			if (this.isOpen) {
 				this.setSubmittingState(false);
-				if (!shouldClose) {
+				if (refinedText === null) {
 					this.inputEl.focus();
 				}
 			}
 		}
 
-		if (shouldClose) {
-			this.close({ force: true });
+		if (refinedText === null || !this.isOpen) {
+			return;
+		}
+
+		if (this.options.resultMode === "replace") {
+			this.pendingResult = refinedText;
+			this.applyPendingResult();
+			return;
+		}
+
+		this.showResult(refinedText);
+	}
+
+	private showResult(refinedText: string): void {
+		this.pendingResult = refinedText;
+		this.resultPane.setContent(this.options.originalText, refinedText);
+		this.resultPane.show();
+		this.position();
+	}
+
+	// Apply may fail (the document changed while previewing); the panel stays open
+	// so the result can still be copied instead of being lost.
+	private applyPendingResult(): void {
+		const refinedText = this.pendingResult;
+		if (refinedText === null) {
+			return;
+		}
+
+		try {
+			this.options.onApply(refinedText);
+		} catch (error: unknown) {
+			new Notice(getErrorMessage(error, this.options.t));
+			return;
+		}
+		this.close({ force: true });
+	}
+
+	private async copyPendingResult(): Promise<void> {
+		if (this.pendingResult === null) {
+			return;
+		}
+
+		try {
+			await navigator.clipboard.writeText(this.pendingResult);
+			new Notice(this.options.t("notice.copiedToClipboard"));
+		} catch {
+			new Notice(this.options.t("error.refineRequestFailedFallback"));
 		}
 	}
 
@@ -349,34 +392,14 @@ export class FloatingInput {
 			return;
 		}
 
-		const maxWidth = Math.max(FLOATING_MIN_WIDTH, bounds.right - bounds.left - (FLOATING_EDGE_PADDING * 2));
-		const maxHeight = Math.max(FLOATING_MIN_HEIGHT, bounds.bottom - bounds.top - (FLOATING_EDGE_PADDING * 2));
-		this.containerEl.style.width = `${Math.round(Math.min(FLOATING_MAX_WIDTH, maxWidth))}px`;
-		this.containerEl.style.maxHeight = `${Math.round(maxHeight)}px`;
-
 		const anchor = this.resolveAnchor();
-		if (!anchor) {
-			this.close();
-			return;
-		}
-
 		const rect = this.containerEl.getBoundingClientRect();
-		const panelWidth = rect.width > 0 ? rect.width : FLOATING_MAX_WIDTH;
-		const panelHeight = rect.height > 0 ? rect.height : 220;
-		const minLeft = bounds.left + FLOATING_EDGE_PADDING;
-		const maxLeft = bounds.right - panelWidth - FLOATING_EDGE_PADDING;
-		const safeLeft = clamp(anchor.left, minLeft, Math.max(minLeft, maxLeft));
+		const placement = computePanelPlacement(anchor, bounds, { width: rect.width, height: rect.height });
 
-		const minTop = bounds.top + FLOATING_EDGE_PADDING;
-		const maxTop = bounds.bottom - panelHeight - FLOATING_EDGE_PADDING;
-		let top = anchor.top - panelHeight - FLOATING_ANCHOR_OFFSET;
-		if (top < minTop) {
-			top = anchor.bottom + FLOATING_ANCHOR_OFFSET;
-		}
-		top = clamp(top, minTop, Math.max(minTop, maxTop));
-
-		this.containerEl.style.left = `${Math.round(safeLeft)}px`;
-		this.containerEl.style.top = `${Math.round(top)}px`;
+		this.containerEl.style.width = `${placement.width}px`;
+		this.containerEl.style.maxHeight = `${placement.maxHeight}px`;
+		this.containerEl.style.left = `${placement.left}px`;
+		this.containerEl.style.top = `${placement.top}px`;
 	}
 
 	private resolveAnchor(): FloatingAnchor {
@@ -384,25 +407,19 @@ export class FloatingInput {
 		if (nextAnchor) {
 			this.currentAnchor = nextAnchor;
 		}
-		return this.toMountCoordinates(this.currentAnchor);
+		return toMountCoordinates(this.mountEl, this.currentAnchor);
 	}
 
 	private resolveBounds(): FloatingBounds | null {
 		const bounds = this.options.boundsResolver?.();
 		if (bounds) {
-			return this.toMountCoordinates(bounds);
+			return toMountCoordinates(this.mountEl, bounds);
 		}
 		if (this.options.boundsResolver) {
 			return null;
 		}
 
-		const viewportBounds: FloatingBounds = {
-			left: window.scrollX,
-			right: window.scrollX + window.innerWidth,
-			top: window.scrollY,
-			bottom: window.scrollY + window.innerHeight,
-		};
-		return this.toMountCoordinates(viewportBounds);
+		return toMountCoordinates(this.mountEl, getViewportBounds());
 	}
 
 	private setSubmittingState(value: boolean): void {
@@ -410,14 +427,10 @@ export class FloatingInput {
 		this.inputEl.disabled = value;
 		this.cancelButtonEl.disabled = false;
 		this.runButtonEl.disabled = value;
-		if (this.voiceButtonEl) {
-			this.voiceButtonEl.disabled = value;
-		}
+		this.voice?.setDisabled(value);
+		this.resultPane.setDisabled(value);
 		for (const presetButton of this.presetButtons.values()) {
 			presetButton.disabled = value;
-		}
-		if (value) {
-			this.voiceRecorder?.stop(true);
 		}
 		this.runButtonEl.textContent = value ? this.options.t("floating.running") : this.options.t("floating.run");
 		this.cancelButtonEl.textContent = value ? this.options.t("floating.cancelRunning") : this.options.t("floating.cancel");
@@ -425,14 +438,6 @@ export class FloatingInput {
 
 	private cancelActiveSubmit(): void {
 		const controller = this.activeSubmitAbortController;
-		if (!controller || controller.signal.aborted) {
-			return;
-		}
-		controller.abort();
-	}
-
-	private cancelActiveTranscribe(): void {
-		const controller = this.activeTranscribeAbortController;
 		if (!controller || controller.signal.aborted) {
 			return;
 		}
@@ -453,40 +458,6 @@ export class FloatingInput {
 		}
 	}
 
-	private createVoiceButton(t: Translator, languageCode: string): HTMLButtonElement {
-		const button = activeDocument.createElement("button");
-		button.type = "button";
-		button.className = "ai-refiner-floating-input__voice";
-		button.setAttribute("aria-label", t("floating.voice.start"));
-		button.dataset.language = languageCode.trim();
-		button.textContent = t("floating.voice.start");
-		button.addEventListener("click", () => {
-			if (this.isTranscribing) {
-				return;
-			}
-			if (this.voiceRecorder?.isRecording) {
-				this.voiceRecorder.stop(false);
-			} else {
-				this.startVoiceInput();
-			}
-		});
-		return button;
-	}
-
-	private startVoiceInput(): void {
-		if (this.isSubmitting || this.isTranscribing || !this.voiceRecorder) {
-			return;
-		}
-
-		const voiceConfig = this.options.voiceInput;
-		if (!voiceConfig || !voiceConfig.apiEndpoint.trim() || !voiceConfig.apiModel.trim()) {
-			new Notice(this.options.t("notice.voiceApiNotConfigured"));
-			return;
-		}
-
-		void this.voiceRecorder.start();
-	}
-
 	private appendTranscript(transcript: string): void {
 		const cleanTranscript = transcript.trim();
 		if (!cleanTranscript) {
@@ -502,67 +473,6 @@ export class FloatingInput {
 		}
 		this.inputEl.focus();
 		this.inputEl.setSelectionRange(this.inputEl.value.length, this.inputEl.value.length);
-	}
-
-	private syncVoiceUi(): void {
-		if (!this.voiceButtonEl) {
-			return;
-		}
-
-		const t = this.options.t;
-		const isRecording = this.voiceRecorder?.isRecording ?? false;
-		const isActive = isRecording || this.isTranscribing;
-		this.voiceButtonEl.classList.toggle("is-listening", isRecording);
-		this.voiceButtonEl.classList.toggle("is-recording", isRecording);
-		this.voiceButtonEl.classList.toggle("is-transcribing", this.isTranscribing);
-
-		if (this.isTranscribing) {
-			this.voiceButtonEl.textContent = t("floating.voice.transcribing");
-		} else if (isRecording) {
-			this.voiceButtonEl.textContent = t("floating.voice.recording");
-		} else {
-			this.voiceButtonEl.textContent = t("floating.voice.start");
-		}
-
-		this.voiceButtonEl.setAttribute(
-			"aria-label",
-			isActive ? t("floating.voice.stop") : t("floating.voice.start"),
-		);
-	}
-
-	private async transcribeRecordedAudio(audioBlob: Blob): Promise<void> {
-		const voiceConfig = this.options.voiceInput;
-		if (!voiceConfig) {
-			return;
-		}
-
-		this.isTranscribing = true;
-		this.syncVoiceUi();
-		const abortController = new AbortController();
-		this.activeTranscribeAbortController = abortController;
-		try {
-			const transcript = await transcribeAudioViaApi(audioBlob, {
-				endpoint: voiceConfig.apiEndpoint,
-				model: voiceConfig.apiModel,
-				apiToken: voiceConfig.apiToken,
-				languageCode: voiceConfig.languageCode,
-			}, abortController.signal);
-			if (!abortController.signal.aborted && this.isOpen) {
-				this.appendTranscript(transcript);
-			}
-		} catch (error: unknown) {
-			if (!isAbortError(error)) {
-				new Notice(getErrorMessage(error, this.options.t));
-			}
-		} finally {
-			if (this.activeTranscribeAbortController === abortController) {
-				this.activeTranscribeAbortController = null;
-			}
-			this.isTranscribing = false;
-			if (this.isOpen) {
-				this.syncVoiceUi();
-			}
-		}
 	}
 
 	private prepareMountElement(): void {
@@ -585,46 +495,6 @@ export class FloatingInput {
 		this.mountEl.classList.remove("ai-refiner-floating-mount");
 		this.patchedMountClass = false;
 	}
-
-	private toMountCoordinates(bounds: FloatingBounds): FloatingBounds;
-	private toMountCoordinates(anchor: FloatingAnchor): FloatingAnchor;
-	private toMountCoordinates(value: FloatingBounds | FloatingAnchor): FloatingBounds | FloatingAnchor {
-		if (this.mountEl === activeDocument.body) {
-			return value;
-		}
-
-		const mountRect = this.mountEl.getBoundingClientRect();
-		const mountLeft = mountRect.left + window.scrollX;
-		const mountTop = mountRect.top + window.scrollY;
-
-		if ("right" in value) {
-			return {
-				left: value.left - mountLeft,
-				right: value.right - mountLeft,
-				top: value.top - mountTop,
-				bottom: value.bottom - mountTop,
-			};
-		}
-
-		return {
-			left: value.left - mountLeft,
-			top: value.top - mountTop,
-			bottom: value.bottom - mountTop,
-		};
-	}
-}
-
-function clamp(value: number, min: number, max: number): number {
-	return Math.min(max, Math.max(min, value));
-}
-
-function isAbortError(error: unknown): boolean {
-	return error instanceof ProviderAbortError
-		|| (error instanceof Error && error.name === "AbortError");
-}
-
-function getErrorMessage(error: unknown, t: Translator): string {
-	return error instanceof Error ? error.message : t("error.refineRequestFailedFallback");
 }
 
 function sanitizePresets(presets: QuickPromptItem[]): QuickPromptItem[] {

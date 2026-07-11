@@ -1,7 +1,8 @@
 import { isPluginLanguage } from "../i18n";
-import type { AIRefinerSettings, ProviderId } from "./types";
+import type { AIRefinerSettings, CliProviderId, ProviderId } from "./types";
 import { normalizeHotkeyCombo } from "../utils/hotkey";
 import { BUILT_IN_QUICK_PROMPTS } from "../prompts/quickPrompts";
+import { NPX_PRESETS, isNpxExecutable, normalizeCliArgsForExecutable } from "../providers/cliPresets";
 import { VOICE_DEFAULT_ENDPOINT, VOICE_DEFAULT_MODEL } from "../voice/constants";
 
 interface LegacySettingsShape extends Partial<AIRefinerSettings> {
@@ -29,12 +30,17 @@ const CUSTOM_API_PROVIDER_IDS = new Set(["custom-api", "http-api"]);
 
 // Current persisted settings schema version. Bump when the shape changes and add
 // a step to migrateRawSettings so older data.json files upgrade on load.
-export const CURRENT_SCHEMA_VERSION = 1;
+// v2: `npx -y <package>` CLI configs are rewritten to the bare binary — the plugin
+// no longer downloads/executes remote code through the npx launcher.
+// v3: resultMode introduced. New installs default to "preview"; existing vaults
+// (data.json without the field) keep their historical replace-immediately behavior.
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export const DEFAULT_SETTINGS: AIRefinerSettings = {
 	schemaVersion: CURRENT_SCHEMA_VERSION,
 	languageMode: "auto",
 	language: "en",
+	resultMode: "preview",
 	activeProvider: "gemini-cli",
 	prompt: {
 		prependInstruction: "",
@@ -92,6 +98,7 @@ export function mergeSettings(raw: Partial<AIRefinerSettings> | null | undefined
 		schemaVersion: CURRENT_SCHEMA_VERSION,
 		languageMode: sanitizeLanguageMode(migrated?.languageMode),
 		language: sanitizeLanguage(migrated?.language),
+		resultMode: sanitizeResultMode(migrated?.resultMode),
 		activeProvider: getProviderId(migrated?.activeProvider),
 		prompt: {
 			prependInstruction: sanitizePrompt(migrated?.prompt?.prependInstruction),
@@ -125,15 +132,60 @@ export function mergeSettings(raw: Partial<AIRefinerSettings> | null | undefined
 }
 
 // Applies ordered, version-gated reshaping to a raw data.json object before it
-// is sanitized. v1 is the first stamped schema, so there is nothing to upgrade
-// yet; future shape changes add a step keyed on the stored schemaVersion.
+// is sanitized. Steps are keyed on the stored schemaVersion and idempotent.
 function migrateRawSettings(
 	raw: Partial<AIRefinerSettings> | null | undefined,
 ): Partial<AIRefinerSettings> | null | undefined {
 	if (!isObjectLike(raw)) {
 		return raw;
 	}
-	return raw;
+
+	const fromVersion = typeof raw.schemaVersion === "number" ? raw.schemaVersion : 1;
+	let migrated = raw;
+	if (fromVersion < 2) {
+		migrated = {
+			...migrated,
+			geminiCli: migrateNpxCliConfig("gemini-cli", migrated.geminiCli),
+			codexCli: migrateNpxCliConfig("codex-cli", migrated.codexCli),
+		};
+	}
+	if (fromVersion < 3 && migrated.resultMode === undefined) {
+		// Pre-v3 vaults always replaced the selection immediately; keep that
+		// behavior for them instead of springing the new preview flow on upgrade.
+		migrated = { ...migrated, resultMode: "replace" };
+	}
+	return migrated;
+}
+
+// v2 step: configs using the `npx -y <package> …` launcher auto-downloaded and ran
+// remote code on every invocation. Recognized presets are rewritten to the locally
+// installed binary; unrecognized npx setups are left untouched (user-authored).
+function migrateNpxCliConfig<T extends { executablePath?: string; argsJson?: string } | undefined>(
+	providerId: CliProviderId,
+	config: T,
+): T {
+	if (
+		!config
+		|| typeof config.executablePath !== "string"
+		|| typeof config.argsJson !== "string"
+		|| !isNpxExecutable(config.executablePath)
+	) {
+		return config;
+	}
+
+	const bareExecutable = providerId === "gemini-cli" ? "gemini" : "codex";
+	const bareArgsJson = normalizeCliArgsForExecutable(providerId, bareExecutable, config.argsJson);
+	// Only rewrite when the args actually matched the known `-y <package>` preset;
+	// otherwise this is a custom npx setup the user built deliberately.
+	if (bareArgsJson === config.argsJson && config.argsJson !== NPX_PRESETS[providerId].bareArgsJson) {
+		return config;
+	}
+
+	return {
+		...config,
+		executablePath: bareExecutable,
+		argsJson: bareArgsJson,
+	};
 }
 
 function mergeHttpConfig(
@@ -156,6 +208,10 @@ function sanitizeLanguage(value: unknown): AIRefinerSettings["language"] {
 
 function sanitizeLanguageMode(value: unknown): AIRefinerSettings["languageMode"] {
 	return value === "manual" ? "manual" : "auto";
+}
+
+function sanitizeResultMode(value: unknown): AIRefinerSettings["resultMode"] {
+	return value === "replace" ? "replace" : "preview";
 }
 
 function getProviderId(value: unknown): ProviderId {

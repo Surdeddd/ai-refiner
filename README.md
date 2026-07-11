@@ -9,13 +9,19 @@ nothing leaves your machine unless you configure it to.
 ## Features
 
 - **Floating prompt** anchored to your cursor — type an instruction, press Enter, done.
+- **Result preview with diff** (default) — the refined text is shown as a word-level
+  diff against your selection with **Apply / Retry / Copy / Discard** before anything
+  touches the note. Prefer the old behavior? Switch **Result mode** to
+  *Replace immediately* in settings (upgrades from older versions keep it).
 - **Quick prompt presets** — one-click Fix grammar, Make clearer, Shorten, Formal tone,
   Translate — fully editable, and you can add your own.
 - **Multiple backends** through one pipeline (see the table below).
 - **Three ways to trigger**: command palette, ribbon icon, or a custom hotkey.
 - **Optional voice input** — dictate your instruction via a Whisper-compatible
   transcription endpoint (off by default).
-- **In-flight cancel** — press Escape to abort a running request.
+- **In-flight cancel** — press Escape to cancel. CLI providers are terminated for
+  real (SIGTERM); for HTTP providers the result is discarded — Obsidian's network API
+  cannot abort an already-sent request, so the server may still finish processing it.
 - **Safe replacement** — if the document changes while a request runs, the stale result
   is discarded instead of overwriting unrelated text.
 - **Localized** UI (English, Russian, Spanish) that follows your Obsidian language.
@@ -54,6 +60,24 @@ folder as above, or use the deploy helper:
 OBSIDIAN_PLUGIN_DIR="$HOME/Obsidian/.obsidian/plugins/ai-refiner" npm run deploy
 ```
 
+### Installing the CLI providers (desktop)
+
+CLI providers run a **locally installed** binary — the plugin never downloads or
+executes remote code itself (for that reason there is no `npx` preset: `npx -y`
+would fetch and run a package from the npm registry on every request). Install the
+CLI you want once, sign in, and point the plugin at the binary:
+
+- **Codex CLI**: `npm install -g @openai/codex` (or `brew install codex`), then run
+  `codex login` in a terminal. Plugin default executable: `codex`.
+- **Gemini CLI**: `npm install -g @google/gemini-cli` (or `brew install gemini-cli`),
+  then run `gemini` once to authenticate. Plugin default executable: `gemini`.
+
+If the bare command is not found from Obsidian (GUI apps don't inherit your shell
+PATH), the plugin also checks the common install directories; otherwise set the
+absolute path in settings (`which codex` / `which gemini` shows it). Configs from
+older plugin versions that used the `npx` preset are migrated to the bare binary
+automatically.
+
 ## Usage
 
 1. Select some text in a note.
@@ -65,6 +89,8 @@ OBSIDIAN_PLUGIN_DIR="$HOME/Obsidian/.obsidian/plugins/ai-refiner" npm run deploy
 ## Settings
 
 - **Provider** — the backend used for refinement.
+- **Result mode** — preview the result (with a diff and Apply/Retry/Copy/Discard)
+  or replace the selection immediately.
 - **Base instruction** — optional text prepended to every request.
 - **Shortcut** — capture and enable a custom hotkey.
 - **Voice input** — enable the microphone button and set the transcription endpoint.
@@ -91,8 +117,13 @@ What is sent, and where:
 - **Model discovery** (optional) — pressing "detect models" queries the provider's models
   endpoint.
 
-**Token storage:** API tokens are saved unencrypted in the plugin's `data.json`. A synced
-or backed-up vault propagates them, so do not share that file.
+**Token storage:** on Obsidian **1.11.4+**, API and voice tokens are kept in Obsidian's
+SecretStorage (**Settings → Keychain**; encrypted at rest by your OS keychain since app
+1.11.5) and are automatically migrated out of `data.json` on first load — the plaintext
+copy is removed only after the keychain write is verified. Keychain secrets are
+**per device** and never sync: after syncing a vault to a new device, re-enter the token
+there once. On older Obsidian versions tokens remain unencrypted in the plugin's
+`data.json` — a synced or backed-up vault propagates them, so do not share that file.
 
 ## Mobile
 
@@ -115,17 +146,24 @@ Source lives in `src/`, split by responsibility: `providers/` (backend strategie
 
 ## Releasing
 
-Releases are automated by `.github/workflows/release.yml`. Bump the version (this updates
-`manifest.json` and `versions.json`), then push a tag **equal to the manifest version**
-(no `v` prefix):
+Releases are automated by `.github/workflows/release.yml` and triggered by pushing a
+tag **equal to the manifest version** (no `v` prefix — the project-level `.npmrc` sets
+`tag-version-prefix=""`, so `npm version` creates the right tag regardless of your
+global npm configuration).
 
 ```bash
-npm version patch   # or minor / major
+npm run build            # produce main.js
+npm run release-check    # versions in sync, artifacts present, tag format
+npm version patch        # or minor / major — bumps package.json + manifest.json,
+                         # updates versions.json when minAppVersion changed,
+                         # commits and creates the un-prefixed tag
 git push && git push --tags
 ```
 
-The workflow lints, tests, builds, and attaches `main.js`, `manifest.json`, and
-`styles.css` to a GitHub release.
+The workflow re-runs lint, tests, build, and `release-check`, then attests build
+provenance and attaches `main.js`, `manifest.json`, and `styles.css` to a GitHub
+release. `versions.json` gets a new entry only when `minAppVersion` changes — that map
+is what serves older Obsidian installs the last compatible release.
 
 ## License
 

@@ -2,10 +2,20 @@ import { describe, expect, it } from "vitest";
 import { CURRENT_SCHEMA_VERSION, DEFAULT_SETTINGS, mergeSettings } from "../src/settings/defaults";
 
 describe("mergeSettings", () => {
-	it("returns defaults for null/undefined/empty input", () => {
+	it("returns defaults for null/undefined input (fresh install)", () => {
 		expect(mergeSettings(null)).toEqual(DEFAULT_SETTINGS);
 		expect(mergeSettings(undefined)).toEqual(DEFAULT_SETTINGS);
-		expect(mergeSettings({})).toEqual(DEFAULT_SETTINGS);
+		// An existing data.json (even empty) predates v3: it keeps the historical
+		// replace-immediately behavior instead of the new preview default.
+		expect(mergeSettings({})).toEqual({ ...DEFAULT_SETTINGS, resultMode: "replace" });
+	});
+
+	it("resultMode: preview for fresh installs, replace for pre-v3 vaults, stored value wins", () => {
+		expect(mergeSettings(null).resultMode).toBe("preview");
+		expect(mergeSettings({ schemaVersion: 2 } as never).resultMode).toBe("replace");
+		expect(mergeSettings({ schemaVersion: 3, resultMode: "replace" } as never).resultMode).toBe("replace");
+		expect(mergeSettings({ schemaVersion: 2, resultMode: "preview" } as never).resultMode).toBe("preview");
+		expect(mergeSettings({ schemaVersion: 3, resultMode: "bogus" } as never).resultMode).toBe("preview");
 	});
 
 	it("stamps the current schema version regardless of stored value", () => {
@@ -68,5 +78,78 @@ describe("mergeSettings", () => {
 			quickPrompts: { custom: [], builtInOverrides: [], hiddenBuiltInIds: ["fix-grammar", "not-real"] },
 		} as never);
 		expect(merged.quickPrompts.hiddenBuiltInIds).toEqual(["fix-grammar"]);
+	});
+});
+
+describe("schema v2 migration: npx presets to bare binaries", () => {
+	it("rewrites the recognized codex npx preset to the bare binary", () => {
+		const settings = mergeSettings({
+			schemaVersion: 1,
+			codexCli: {
+				executablePath: "npx",
+				argsJson: "[\"-y\", \"@openai/codex\", \"exec\", \"--skip-git-repo-check\"]",
+				timeoutMs: 60000,
+			},
+		} as never);
+
+		expect(settings.codexCli.executablePath).toBe("codex");
+		expect(settings.codexCli.argsJson).toBe("[\"exec\",\"--skip-git-repo-check\"]");
+	});
+
+	it("rewrites the recognized gemini npx preset to the bare binary", () => {
+		const settings = mergeSettings({
+			schemaVersion: 1,
+			geminiCli: {
+				executablePath: "npx",
+				argsJson: "[\"-y\", \"@google/gemini-cli\"]",
+				timeoutMs: 60000,
+			},
+		} as never);
+
+		expect(settings.geminiCli.executablePath).toBe("gemini");
+		expect(settings.geminiCli.argsJson).toBe("[]");
+	});
+
+	it("leaves a custom npx setup untouched", () => {
+		const settings = mergeSettings({
+			schemaVersion: 1,
+			codexCli: {
+				executablePath: "npx",
+				argsJson: "[\"my-own-wrapper\", \"--flag\"]",
+				timeoutMs: 60000,
+			},
+		} as never);
+
+		expect(settings.codexCli.executablePath).toBe("npx");
+		expect(settings.codexCli.argsJson).toBe("[\"my-own-wrapper\", \"--flag\"]");
+	});
+
+	it("does not touch bare-binary configs", () => {
+		const settings = mergeSettings({
+			schemaVersion: 1,
+			codexCli: {
+				executablePath: "/opt/homebrew/bin/codex",
+				argsJson: "[\"exec\"]",
+				timeoutMs: 60000,
+			},
+		} as never);
+
+		expect(settings.codexCli.executablePath).toBe("/opt/homebrew/bin/codex");
+		expect(settings.codexCli.argsJson).toBe("[\"exec\"]");
+	});
+
+	it("is idempotent for already-migrated (v2) data", () => {
+		const migratedOnce = mergeSettings({
+			schemaVersion: 1,
+			codexCli: {
+				executablePath: "npx",
+				argsJson: "[\"-y\", \"@openai/codex\", \"exec\", \"--skip-git-repo-check\"]",
+				timeoutMs: 60000,
+			},
+		} as never);
+		const migratedTwice = mergeSettings(migratedOnce);
+
+		expect(migratedTwice.codexCli).toEqual(migratedOnce.codexCli);
+		expect(migratedTwice.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
 	});
 });

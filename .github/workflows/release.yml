@@ -30,19 +30,16 @@ jobs:
           npm test
           npm run build
 
-      - name: Verify tag matches manifest version
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
-          if [ "$TAG" != "$MANIFEST_VERSION" ]; then
-            echo "Tag $TAG does not match manifest version $MANIFEST_VERSION" >&2
-            exit 1
-          fi
+      - name: Release preflight (versions, tag, artifacts)
+        run: npm run release-check
 
       - name: Attest build provenance for release assets
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: "main.js, manifest.json, styles.css"
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
 
       - name: Create GitHub release with plugin assets
         env:

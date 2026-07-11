@@ -8,18 +8,22 @@ import {
     isRecord,
     parseJson,
     removeTrailingSlash,
-    requestUrlWithAbort,
+    requestUrlWithSignal,
     unique,
 } from "../utils/api";
 import type { IAIProvider, ProviderGenerateOptions } from "./IAIProvider";
 import { throwIfAborted } from "./IAIProvider";
-import { SYSTEM_PROMPT } from "./constants";
+import {
+	GOOGLE_API_KEY_HEADER,
+	buildAnthropicHeaders,
+	buildAnthropicPayload,
+	buildGoogleHeaders,
+	buildGooglePayload,
+	buildOpenAiCompatibleHeaders,
+	buildOpenAiCompatiblePayload,
+} from "./payloads";
 
 type EndpointKind = "openai-compatible" | "anthropic" | "google";
-
-const ANTHROPIC_VERSION = "2023-06-01";
-const ANTHROPIC_MAX_OUTPUT_TOKENS = 8192;
-const GOOGLE_API_KEY_HEADER = "x-goog-api-key";
 
 export class HttpApiProvider implements IAIProvider {
 	private readonly config: HttpApiConfig;
@@ -61,18 +65,12 @@ export class HttpApiProvider implements IAIProvider {
 		instruction: string,
 		signal?: AbortSignal,
 	): Promise<string> {
-		const response = await requestUrlWithAbort({
+		const response = await requestUrlWithSignal({
 			url: endpointUrl.toString(),
 			method: "POST",
 			contentType: "application/json",
-			headers: this.buildOpenAiCompatibleHeaders(apiToken, endpointUrl),
-			body: JSON.stringify({
-				model,
-				messages: [
-					{ role: "system", content: SYSTEM_PROMPT },
-					{ role: "user", content: buildUserPrompt(instruction, text) },
-				],
-			}),
+			headers: buildOpenAiCompatibleHeaders(apiToken, { isOpenRouter: isOpenRouterEndpoint(endpointUrl) }),
+			body: JSON.stringify(buildOpenAiCompatiblePayload(model, text, instruction)),
 			throw: false,
 		}, signal);
 
@@ -97,25 +95,12 @@ export class HttpApiProvider implements IAIProvider {
 		instruction: string,
 		signal?: AbortSignal,
 	): Promise<string> {
-		const response = await requestUrlWithAbort({
+		const response = await requestUrlWithSignal({
 			url: endpointUrl.toString(),
 			method: "POST",
 			contentType: "application/json",
-			headers: {
-				"x-api-key": apiToken,
-				"anthropic-version": ANTHROPIC_VERSION,
-			},
-			body: JSON.stringify({
-				model,
-				max_tokens: ANTHROPIC_MAX_OUTPUT_TOKENS,
-				system: SYSTEM_PROMPT,
-				messages: [
-					{
-						role: "user",
-						content: [{ type: "text", text: buildUserPrompt(instruction, text) }],
-					},
-				],
-			}),
+			headers: buildAnthropicHeaders(apiToken),
+			body: JSON.stringify(buildAnthropicPayload(model, text, instruction)),
 			throw: false,
 		}, signal);
 
@@ -141,22 +126,12 @@ export class HttpApiProvider implements IAIProvider {
 		signal?: AbortSignal,
 	): Promise<string> {
 		const url = buildGoogleGenerateContentUrl(endpointUrl, model);
-		const response = await requestUrlWithAbort({
+		const response = await requestUrlWithSignal({
 			url: url.toString(),
 			method: "POST",
 			contentType: "application/json",
-			headers: { [GOOGLE_API_KEY_HEADER]: apiToken },
-			body: JSON.stringify({
-				systemInstruction: {
-					parts: [{ text: SYSTEM_PROMPT }],
-				},
-				contents: [
-					{
-						role: "user",
-						parts: [{ text: buildUserPrompt(instruction, text) }],
-					},
-				],
-			}),
+			headers: buildGoogleHeaders(apiToken),
+			body: JSON.stringify(buildGooglePayload(text, instruction)),
 			throw: false,
 		}, signal);
 
@@ -173,19 +148,6 @@ export class HttpApiProvider implements IAIProvider {
 		return content;
 	}
 
-	private buildOpenAiCompatibleHeaders(apiToken: string, endpointUrl: URL): Record<string, string> {
-		const headers: Record<string, string> = {};
-		if (apiToken) {
-			headers["Authorization"] = `Bearer ${apiToken}`;
-		}
-
-		if (isOpenRouterEndpoint(endpointUrl)) {
-			headers["HTTP-Referer"] = "https://obsidian.md";
-			headers["X-Title"] = "AI Refiner";
-		}
-
-		return headers;
-	}
 }
 
 export async function discoverModelsForProvider(config: HttpApiConfig): Promise<string[]> {
@@ -255,10 +217,7 @@ async function discoverAnthropicModels(endpointUrl: URL, apiToken: string): Prom
 	const response = await requestUrl({
 		url: modelsUrl.toString(),
 		method: "GET",
-		headers: {
-			"x-api-key": apiToken,
-			"anthropic-version": ANTHROPIC_VERSION,
-		},
+		headers: buildAnthropicHeaders(apiToken),
 		throw: false,
 	});
 
@@ -486,10 +445,6 @@ function extractErrorMessage(payload: unknown): string | null {
 	}
 
 	return null;
-}
-
-function buildUserPrompt(instruction: string, text: string): string {
-	return `Instruction:\n${instruction.trim()}\n\nText:\n${text}`;
 }
 
 function requiresToken(endpointUrl: URL): boolean {

@@ -1,5 +1,5 @@
 import { type RequestUrlResponse } from "obsidian";
-import { isRecord, requestUrlWithAbort } from "../utils/api";
+import { isRecord, requestUrlWithSignal } from "../utils/api";
 import { ProviderAbortError, throwIfAborted } from "../providers/IAIProvider";
 import {
 	VOICE_LOOPBACK_HOST_CANDIDATES,
@@ -56,7 +56,7 @@ export async function transcribeAudioViaApi(
 	for (const candidate of candidates) {
 		let response: RequestUrlResponse;
 		try {
-			response = await requestUrlWithAbort({
+			response = await requestUrlWithSignal({
 				url: candidate.toString(),
 				method: "POST",
 				headers,

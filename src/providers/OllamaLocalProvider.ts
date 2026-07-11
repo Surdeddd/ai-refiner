@@ -6,12 +6,12 @@ import {
     inferOpenAiModelsUrl,
     isRecord,
     parseJson,
-    requestUrlWithAbort,
+    requestUrlWithSignal,
     unique,
 } from "../utils/api";
 import type { IAIProvider, ProviderGenerateOptions } from "./IAIProvider";
 import { ProviderAbortError, throwIfAborted } from "./IAIProvider";
-import { SYSTEM_PROMPT } from "./constants";
+import { buildOllamaGeneratePayload, buildOpenAiLocalPayload } from "./payloads";
 
 interface OllamaGenerateResponse {
 	response?: string;
@@ -31,19 +31,18 @@ export class OllamaLocalProvider implements IAIProvider {
 			throw new Error("Local model id is required.");
 		}
 
-		const prompt = buildPrompt(text, instruction);
 		const primaryKind = detectLocalEndpointKind(endpoint);
 		const attempts: Array<{
 			label: string;
 			run: () => Promise<string>;
 		}> = primaryKind === "ollama"
 			? [
-				{ label: "Ollama", run: () => generateWithOllama(endpoint, model, prompt, options?.signal) },
-				{ label: "OpenAI-compatible local", run: () => generateWithOpenAiLocal(endpoint, model, prompt, options?.signal) },
+				{ label: "Ollama", run: () => generateWithOllama(endpoint, model, text, instruction, options?.signal) },
+				{ label: "OpenAI-compatible local", run: () => generateWithOpenAiLocal(endpoint, model, text, instruction, options?.signal) },
 			]
 			: [
-				{ label: "OpenAI-compatible local", run: () => generateWithOpenAiLocal(endpoint, model, prompt, options?.signal) },
-				{ label: "Ollama", run: () => generateWithOllama(endpoint, model, prompt, options?.signal) },
+				{ label: "OpenAI-compatible local", run: () => generateWithOpenAiLocal(endpoint, model, text, instruction, options?.signal) },
+				{ label: "Ollama", run: () => generateWithOllama(endpoint, model, text, instruction, options?.signal) },
 			];
 
 		const errors: string[] = [];
@@ -97,10 +96,6 @@ export async function discoverOllamaModels(config: OllamaLocalConfig): Promise<s
 	}
 
 	return [];
-}
-
-function buildPrompt(text: string, instruction: string): string {
-	return `${SYSTEM_PROMPT}\n\nInstruction:\n${instruction.trim()}\n\nText:\n${text}`;
 }
 
 function parseEndpoint(rawEndpoint: string): URL {
@@ -224,18 +219,15 @@ function extractOpenAiContent(payload: unknown): string | null {
 async function generateWithOllama(
 	endpoint: URL,
 	model: string,
-	prompt: string,
+	text: string,
+	instruction: string,
 	signal?: AbortSignal,
 ): Promise<string> {
-	const response = await requestUrlWithAbort({
+	const response = await requestUrlWithSignal({
 		url: buildOllamaGenerateUrl(endpoint).toString(),
 		method: "POST",
 		contentType: "application/json",
-		body: JSON.stringify({
-			model,
-			stream: false,
-			prompt,
-		}),
+		body: JSON.stringify(buildOllamaGeneratePayload(model, text, instruction)),
 		throw: false,
 	}, signal);
 
@@ -255,20 +247,15 @@ async function generateWithOllama(
 async function generateWithOpenAiLocal(
 	endpoint: URL,
 	model: string,
-	prompt: string,
+	text: string,
+	instruction: string,
 	signal?: AbortSignal,
 ): Promise<string> {
-	const response = await requestUrlWithAbort({
+	const response = await requestUrlWithSignal({
 		url: endpoint.toString(),
 		method: "POST",
 		contentType: "application/json",
-		body: JSON.stringify({
-			model,
-			messages: [
-				{ role: "system", content: SYSTEM_PROMPT },
-				{ role: "user", content: prompt },
-			],
-		}),
+		body: JSON.stringify(buildOpenAiLocalPayload(model, text, instruction)),
 		throw: false,
 	}, signal);
 

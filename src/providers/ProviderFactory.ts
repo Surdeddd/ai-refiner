@@ -4,15 +4,15 @@ import { GeminiCliProvider } from "./GeminiCliProvider";
 import { HttpApiProvider } from "./HttpApiProvider";
 import type { IAIProvider } from "./IAIProvider";
 import { OllamaLocalProvider } from "./OllamaLocalProvider";
-import { isProviderSupportedOnCurrentPlatform } from "./providerAvailability";
+import { getEffectiveProviderForCurrentPlatform } from "./providerAvailability";
 
 export class ProviderFactory {
 	create(settings: AIRefinerSettings): IAIProvider {
-		if (!isProviderSupportedOnCurrentPlatform(settings.activeProvider)) {
-			throw new Error(`Provider "${settings.activeProvider}" is not supported on this platform.`);
-		}
+		// The stored preference may be a desktop-only provider while running on
+		// mobile; resolve the platform-appropriate provider without persisting it.
+		const effectiveProvider = getEffectiveProviderForCurrentPlatform(settings.activeProvider);
 
-		switch (settings.activeProvider) {
+		switch (effectiveProvider) {
 			case "gemini-cli":
 				return new GeminiCliProvider(settings.geminiCli);
 			case "codex-cli":
@@ -22,7 +22,7 @@ export class ProviderFactory {
 			case "custom-api":
 				return new HttpApiProvider(settings.customApi);
 			default:
-				return assertNever(settings.activeProvider);
+				return assertNever(effectiveProvider);
 		}
 	}
 }

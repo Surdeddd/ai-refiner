@@ -31,3 +31,4 @@ coverage/
 # AI agent working files (not part of the plugin)
 memory-bank/
 AGENTS.md
+.remember/

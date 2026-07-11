@@ -54,6 +54,8 @@ interface ParsedCliConfig {
 interface CliProcessProviderOptions {
 	displayName: string;
 	fallbackExecutables?: string[];
+	// Test seam: production resolves child_process.spawn lazily via window.require.
+	spawnProcess?: SpawnProcess;
 }
 
 export class CliProcessProvider implements IAIProvider {
@@ -92,7 +94,7 @@ export class CliProcessProvider implements IAIProvider {
 	}
 
 	private runCommand(executablePath: string, prompt: string, abortSignal?: AbortSignal): Promise<string> {
-		const spawnProcess = getSpawnProcess(this.options.displayName);
+		const spawnProcess = this.options.spawnProcess ?? getSpawnProcess(this.options.displayName);
 		const target = buildSpawnTarget(executablePath, this.config.args);
 
 		return new Promise((resolve, reject) => {

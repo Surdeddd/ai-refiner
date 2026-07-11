@@ -43,6 +43,8 @@ export interface VoiceRecorderCallbacks {
 // Owns microphone capture: MediaRecorder where a supported container exists, and
 // a ScriptProcessor/PCM-to-WAV fallback otherwise. Produces an audio Blob for the
 // host to transcribe; knows nothing about the transcription endpoint or the DOM.
+export type VoiceRecorderState = "idle" | "starting" | "recording" | "disposed";
+
 export class VoiceRecorder {
 	private recordingMode: "media-recorder" | "pcm-wav" | null = null;
 	private mediaRecorder: MediaRecorder | null = null;
@@ -55,7 +57,10 @@ export class VoiceRecorder {
 	private pcmChunks: Float32Array[] = [];
 	private pcmSampleRate = VOICE_DEFAULT_SAMPLE_RATE;
 	private discardNextRecording = false;
-	private recording = false;
+	// idle -> starting -> recording -> idle, with "disposed" as a terminal state.
+	// "starting" covers the async gap (permission prompt + getUserMedia) so re-entrant
+	// start() calls and dispose-during-prompt are handled explicitly.
+	private state: VoiceRecorderState = "idle";
 
 	constructor(
 		private readonly t: Translator,
@@ -63,7 +68,11 @@ export class VoiceRecorder {
 	) {}
 
 	get isRecording(): boolean {
-		return this.recording;
+		return this.state === "recording";
+	}
+
+	getState(): VoiceRecorderState {
+		return this.state;
 	}
 
 	static isSupported(): boolean {
@@ -71,13 +80,25 @@ export class VoiceRecorder {
 	}
 
 	async start(): Promise<void> {
+		// Re-entry guard: a second start() while one is pending (or while already
+		// recording, or after dispose) is a no-op instead of double-capturing.
+		if (this.state !== "idle") {
+			return;
+		}
+
 		if (!supportsAudioCapture()) {
 			this.callbacks.onNotice(this.t("notice.voiceRecordingNotSupported"));
 			return;
 		}
 
+		this.state = "starting";
+
 		const permissionState = await getMicrophonePermissionState();
+		if (this.state !== "starting") {
+			return;
+		}
 		if (permissionState === "denied") {
+			this.state = "idle";
 			this.callbacks.onNotice(this.t("notice.voicePermissionDenied"));
 			return;
 		}
@@ -86,7 +107,17 @@ export class VoiceRecorder {
 		try {
 			stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 		} catch (error: unknown) {
-			this.callbacks.onNotice(getMicrophoneErrorMessage(error, this.t));
+			if (this.state === "starting") {
+				this.state = "idle";
+				this.callbacks.onNotice(getMicrophoneErrorMessage(error, this.t));
+			}
+			return;
+		}
+
+		// The host may have been closed/disposed while the permission prompt was
+		// open; a stream granted afterwards must be released immediately.
+		if (this.state !== "starting") {
+			stopMediaStream(stream);
 			return;
 		}
 
@@ -100,6 +131,9 @@ export class VoiceRecorder {
 			if (startedPcm) {
 				return;
 			}
+			if (this.state !== "starting") {
+				return;
+			}
 		}
 
 		let recorder: MediaRecorder;
@@ -107,6 +141,7 @@ export class VoiceRecorder {
 			recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
 		} catch {
 			stopMediaStream(stream);
+			this.state = "idle";
 			this.callbacks.onNotice(this.t("notice.voiceRecordingNotSupported"));
 			return;
 		}
@@ -134,12 +169,12 @@ export class VoiceRecorder {
 			return;
 		}
 
-		this.recording = true;
+		this.state = "recording";
 		this.callbacks.onRecordingStateChange();
 	}
 
 	stop(discardRecording: boolean): void {
-		if (this.recordingMode === "pcm-wav" && this.recording) {
+		if (this.recordingMode === "pcm-wav" && this.state === "recording") {
 			this.discardNextRecording = discardRecording;
 			void this.handlePcmStop();
 			return;
@@ -163,16 +198,18 @@ export class VoiceRecorder {
 		this.callbacks.onRecordingStateChange();
 	}
 
-	// Force-stops capture and releases resources without emitting a result.
+	// Terminal: force-stops capture, releases resources, emits no result, and
+	// invalidates any start() still waiting on the permission prompt.
 	dispose(): void {
 		this.cleanup();
+		this.state = "disposed";
 	}
 
+	// Returns false when PCM capture is unavailable WITHOUT touching the stream —
+	// the caller falls back to MediaRecorder on the same (still live) stream.
 	private startPcmRecording(stream: MediaStream): boolean {
 		const AudioContextCtor = getAudioContextCtor();
 		if (!AudioContextCtor) {
-			stopMediaStream(stream);
-			this.callbacks.onNotice(this.t("notice.voiceRecordingNotSupported"));
 			return false;
 		}
 
@@ -180,8 +217,6 @@ export class VoiceRecorder {
 		try {
 			audioContext = new AudioContextCtor();
 		} catch {
-			stopMediaStream(stream);
-			this.callbacks.onNotice(this.t("notice.voiceRecordingNotSupported"));
 			return false;
 		}
 
@@ -201,7 +236,7 @@ export class VoiceRecorder {
 			);
 			this.pcmChunks = [];
 			processor.onaudioprocess = (event) => {
-				if (!this.recording) {
+				if (this.state !== "recording") {
 					return;
 				}
 
@@ -219,21 +254,24 @@ export class VoiceRecorder {
 			this.audioProcessorNode = processor;
 			this.silentGainNode = silentGain;
 			this.recordingMode = "pcm-wav";
-			this.recording = true;
+			this.state = "recording";
 			this.callbacks.onRecordingStateChange();
 			return true;
 		} catch {
+			// Release only what this path created; the stream stays live for the
+			// MediaRecorder fallback in the caller.
 			void audioContext.close().catch(() => undefined);
-			stopMediaStream(stream);
-			this.callbacks.onNotice(this.t("notice.voiceRecordingNotSupported"));
 			return false;
 		}
 	}
 
 	private async handlePcmStop(): Promise<void> {
+		if (this.state === "disposed") {
+			return;
+		}
 		const shouldDiscard = this.discardNextRecording;
 		this.discardNextRecording = false;
-		this.recording = false;
+		this.state = "idle";
 		this.callbacks.onRecordingStateChange();
 
 		const samples = this.pcmChunks;
@@ -253,9 +291,13 @@ export class VoiceRecorder {
 	}
 
 	private async handleRecorderStop(): Promise<void> {
+		// A recorder stopped by dispose() must not emit results or notices.
+		if (this.state === "disposed") {
+			return;
+		}
 		const shouldDiscard = this.discardNextRecording;
 		this.discardNextRecording = false;
-		this.recording = false;
+		this.state = "idle";
 		this.callbacks.onRecordingStateChange();
 
 		if (shouldDiscard) {
@@ -304,7 +346,9 @@ export class VoiceRecorder {
 		this.pcmSampleRate = VOICE_DEFAULT_SAMPLE_RATE;
 		this.recordingMode = null;
 		this.discardNextRecording = false;
-		this.recording = false;
+		if (this.state !== "disposed") {
+			this.state = "idle";
+		}
 	}
 }
 

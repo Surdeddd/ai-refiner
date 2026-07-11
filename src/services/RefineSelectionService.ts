@@ -3,7 +3,6 @@ import type { Translator } from "../i18n";
 import { resolveQuickPrompts } from "../prompts/quickPrompts";
 import { ProviderFactory } from "../providers/ProviderFactory";
 import { throwIfAborted } from "../providers/IAIProvider";
-import { isProviderSupportedOnCurrentPlatform } from "../providers/providerAvailability";
 import type { AIRefinerSettings } from "../settings/types";
 import { FloatingInput, type FloatingAnchor } from "../ui/FloatingInput";
 import { getEditorBounds, getEditorFloatingMount, getPositionCoords, hasSelectedText } from "../utils/editor";
@@ -17,10 +16,26 @@ const OUTPUT_POLICY = [
 	"Keep original language unless the instruction explicitly requests translation.",
 ].join("\n");
 
-interface SelectionSnapshot {
+export interface SelectionSnapshot {
 	text: string;
 	from: EditorPosition;
 	to: EditorPosition;
+}
+
+// Replaces the snapshotted selection, guarding against the document having changed
+// while the request ran — replacing by stale positions would overwrite unrelated
+// text. Exported for unit tests.
+export function replaceSnapshotSelection(
+	editor: Editor,
+	snapshot: SelectionSnapshot,
+	refinedText: string,
+	t: Translator,
+): void {
+	if (editor.getRange(snapshot.from, snapshot.to) !== snapshot.text) {
+		throw new Error(t("error.selectionChanged"));
+	}
+	editor.replaceRange(refinedText, snapshot.from, snapshot.to);
+	editor.setSelection(snapshot.from, getReplacementEnd(snapshot.from, refinedText));
 }
 
 export class RefineSelectionService {
@@ -81,8 +96,12 @@ export class RefineSelectionService {
 				apiToken: settings.voiceInput.apiToken.trim(),
 			},
 			presets: quickPrompts,
-			onSubmit: async (instruction: string, signal: AbortSignal) => {
-				await this.refine(editor, snapshot, instruction, signal);
+			resultMode: settings.resultMode,
+			originalText: snapshot.text,
+			onSubmit: (instruction: string, signal: AbortSignal) =>
+				this.generateRefinedText(snapshot, instruction, signal),
+			onApply: (refinedText: string) => {
+				replaceSnapshotSelection(editor, snapshot, refinedText, this.getTranslator());
 			},
 			onClose: () => {
 				if (this.activeInput === floatingInput) {
@@ -113,12 +132,13 @@ export class RefineSelectionService {
 		};
 	}
 
-	private async refine(
-		editor: Editor,
+	// Generation only — never touches the editor. The panel decides what happens to
+	// the result (immediate apply vs preview), and applies via onApply.
+	private async generateRefinedText(
 		snapshot: SelectionSnapshot,
 		instruction: string,
 		signal: AbortSignal,
-	): Promise<void> {
+	): Promise<string> {
 		const trimmedInstruction = instruction.trim();
 		if (!trimmedInstruction) {
 			throw new Error(this.getTranslator()("error.instructionCannotBeEmpty"));
@@ -126,10 +146,8 @@ export class RefineSelectionService {
 		throwIfAborted(signal);
 
 		const settings = this.getSettings();
-		if (!isProviderSupportedOnCurrentPlatform(settings.activeProvider)) {
-			throw new Error(this.getTranslator()("error.providerNotSupportedOnPlatform"));
-		}
-
+		// ProviderFactory resolves the platform-effective provider itself; a stored
+		// desktop CLI choice silently routes to an API provider on mobile.
 		const provider = this.providerFactory.create(settings);
 		const finalInstruction = buildFinalInstruction(settings.prompt.prependInstruction, trimmedInstruction);
 		const refinedText = await provider.generate(snapshot.text, finalInstruction, { signal });
@@ -138,14 +156,7 @@ export class RefineSelectionService {
 			throw new Error(this.getTranslator()("error.providerReturnedEmptyOutput"));
 		}
 
-		// The document may have changed while the request was running; replacing
-		// by stale positions would overwrite unrelated text.
-		if (editor.getRange(snapshot.from, snapshot.to) !== snapshot.text) {
-			throw new Error(this.getTranslator()("error.selectionChanged"));
-		}
-		throwIfAborted(signal);
-		editor.replaceRange(refinedText, snapshot.from, snapshot.to);
-		editor.setSelection(snapshot.from, getReplacementEnd(snapshot.from, refinedText));
+		return refinedText;
 	}
 
 	private getFallbackAnchor(bounds: { left: number; right: number; top: number; bottom: number } | null): FloatingAnchor {

@@ -18,6 +18,13 @@ export function getLanguage(): string {
 	return "en";
 }
 
+// Real Obsidian compares against the running app version; unit tests emulate a
+// modern app. Tests exercising the "API unavailable" path do it by omitting
+// `secretStorage` from their fake App object.
+export function requireApiVersion(_version: string): boolean {
+	return true;
+}
+
 export class Notice {
 	constructor(public readonly message: string) {}
 }
