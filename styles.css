@@ -295,3 +295,21 @@
 	background: rgba(var(--color-green-rgb), 0.12);
 	border-radius: 2px;
 }
+
+/* Context scope selector */
+.ai-refiner-floating-input__context {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 6px;
+}
+
+.ai-refiner-floating-input__context-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.ai-refiner-floating-input__context-select {
+	flex: 0 1 auto;
+	font-size: var(--font-ui-small);
+}

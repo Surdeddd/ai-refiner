@@ -1,6 +1,7 @@
 import { Notice } from "obsidian";
 import type { Translator } from "../i18n";
 import type { QuickPromptItem, ResultMode } from "../settings/types";
+import type { ContextScope } from "../utils/context";
 import { getErrorMessage, isAbortError } from "./floating/errors";
 import { panelWindow } from "./floating/dom";
 import {
@@ -27,6 +28,9 @@ interface FloatingInputOptions {
 	resultMode: ResultMode;
 	// The snapshotted selection, used to render the preview diff.
 	originalText: string;
+	// Initial context scope; changes are reported (and persisted) via the callback.
+	contextScope: ContextScope;
+	onContextScopeChange?: (scope: ContextScope) => void;
 	// Produces the refined text; MUST NOT touch the editor. onChunk (when passed)
 	// receives incremental output for the live preview.
 	onSubmit: (instruction: string, signal: AbortSignal, onChunk?: (delta: string) => void) => Promise<string>;
@@ -192,6 +196,33 @@ export class FloatingInput {
 		this.inputEl.rows = 3;
 		this.inputEl.addEventListener("keydown", this.handleInputKeyDown);
 
+		const contextRowEl = win.createDiv();
+		contextRowEl.className = "ai-refiner-floating-input__context";
+		const contextLabelEl = win.createSpan();
+		contextLabelEl.className = "ai-refiner-floating-input__context-label";
+		contextLabelEl.textContent = t("floating.context.label");
+		const contextSelectEl = win.createEl("select");
+		contextSelectEl.className = "dropdown ai-refiner-floating-input__context-select";
+		const scopeOptions: Array<[ContextScope, string]> = [
+			["selection", t("floating.context.selection")],
+			["paragraph", t("floating.context.paragraph")],
+			["note", t("floating.context.note")],
+		];
+		for (const [scope, label] of scopeOptions) {
+			const optionEl = win.createEl("option");
+			optionEl.value = scope;
+			optionEl.textContent = label;
+			contextSelectEl.appendChild(optionEl);
+		}
+		contextSelectEl.value = options.contextScope;
+		contextSelectEl.addEventListener("change", () => {
+			const value = contextSelectEl.value;
+			if (value === "selection" || value === "paragraph" || value === "note") {
+				options.onContextScopeChange?.(value);
+			}
+		});
+		contextRowEl.append(contextLabelEl, contextSelectEl);
+
 		const actionsEl = win.createDiv();
 		actionsEl.className = "ai-refiner-floating-input__actions";
 
@@ -228,7 +259,7 @@ export class FloatingInput {
 			},
 			onDiscard: () => this.close(),
 		});
-		bodyEl.append(this.inputEl, actionsEl, this.resultPane.containerEl);
+		bodyEl.append(this.inputEl, contextRowEl, actionsEl, this.resultPane.containerEl);
 		this.containerEl.append(headerEl, bodyEl);
 	}
 

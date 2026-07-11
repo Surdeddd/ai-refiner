@@ -28,6 +28,7 @@ export default class AIRefinerPlugin extends Plugin {
 			() => this.settings,
 			() => this.getTranslator(),
 			() => this.getVoiceLocale(),
+			() => this.saveSettings(),
 		);
 		registerCommands(this, this.refineSelectionService, this.getTranslator());
 

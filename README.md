@@ -15,6 +15,9 @@ nothing leaves your machine unless you configure it to.
   *Replace immediately* in settings (upgrades from older versions keep it).
 - **Quick prompt presets** — one-click Fix grammar, Make clearer, Shorten, Formal tone,
   Translate — fully editable, and you can add your own.
+- **Context scope** — optionally send the surrounding paragraph or the whole note
+  (trimmed to a window around the selection for huge notes) as read-only reference;
+  only the selection is ever replaced. Pick the scope right in the panel.
 - **Multiple backends** through one pipeline (see the table below).
 - **Three ways to trigger**: command palette, ribbon icon, or a custom hotkey.
 - **Optional voice input** — dictate your instruction via a Whisper-compatible

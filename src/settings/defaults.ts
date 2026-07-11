@@ -3,6 +3,7 @@ import type { AIRefinerSettings, CliProviderId, ProviderId } from "./types";
 import { normalizeHotkeyCombo } from "../utils/hotkey";
 import { BUILT_IN_QUICK_PROMPTS } from "../prompts/quickPrompts";
 import { NPX_PRESETS, isNpxExecutable, normalizeCliArgsForExecutable } from "../providers/cliPresets";
+import { sanitizeContextScope } from "../utils/context";
 import { VOICE_DEFAULT_ENDPOINT, VOICE_DEFAULT_MODEL } from "../voice/constants";
 
 interface LegacySettingsShape extends Partial<AIRefinerSettings> {
@@ -41,6 +42,7 @@ export const DEFAULT_SETTINGS: AIRefinerSettings = {
 	languageMode: "auto",
 	language: "en",
 	resultMode: "preview",
+	contextScope: "selection",
 	activeProvider: "gemini-cli",
 	prompt: {
 		prependInstruction: "",
@@ -99,6 +101,7 @@ export function mergeSettings(raw: Partial<AIRefinerSettings> | null | undefined
 		languageMode: sanitizeLanguageMode(migrated?.languageMode),
 		language: sanitizeLanguage(migrated?.language),
 		resultMode: sanitizeResultMode(migrated?.resultMode),
+		contextScope: sanitizeContextScope(migrated?.contextScope),
 		activeProvider: getProviderId(migrated?.activeProvider),
 		prompt: {
 			prependInstruction: sanitizePrompt(migrated?.prompt?.prependInstruction),

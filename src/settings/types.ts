@@ -1,4 +1,5 @@
 import type { PluginLanguage } from "../i18n";
+import type { ContextScope } from "../utils/context";
 
 export type LanguageMode = "auto" | "manual";
 // "preview": show the result with Apply/Retry/Copy/Discard before touching the note;
@@ -65,6 +66,9 @@ export interface AIRefinerSettings {
 	languageMode: LanguageMode;
 	language: PluginLanguage;
 	resultMode: ResultMode;
+	// How much surrounding material is sent as read-only reference alongside the
+	// selection. The replacement target is always just the selection.
+	contextScope: ContextScope;
 	activeProvider: ProviderId;
 	prompt: PromptConfig;
 	quickPrompts: QuickPromptsConfig;

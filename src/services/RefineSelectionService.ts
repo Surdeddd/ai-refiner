@@ -5,6 +5,12 @@ import { ProviderFactory } from "../providers/ProviderFactory";
 import { throwIfAborted } from "../providers/IAIProvider";
 import type { AIRefinerSettings } from "../settings/types";
 import { FloatingInput, type FloatingAnchor } from "../ui/FloatingInput";
+import {
+	extractNoteContext,
+	extractParagraphContext,
+	positionToOffset,
+	type ContextScope,
+} from "../utils/context";
 import { getEditorBounds, getEditorFloatingMount, getPositionCoords, hasSelectedText } from "../utils/editor";
 
 export type TriggerSource = "command" | "hotkey" | "ribbon";
@@ -46,6 +52,7 @@ export class RefineSelectionService {
 		private readonly getSettings: () => AIRefinerSettings,
 		private readonly getTranslator: () => Translator,
 		private readonly getVoiceLocale: () => string,
+		private readonly saveSettings: () => Promise<void> = async () => undefined,
 		providerFactory: ProviderFactory = new ProviderFactory(),
 	) {
 		this.providerFactory = providerFactory;
@@ -98,8 +105,13 @@ export class RefineSelectionService {
 			presets: quickPrompts,
 			resultMode: settings.resultMode,
 			originalText: snapshot.text,
+			contextScope: settings.contextScope,
+			onContextScopeChange: (scope: ContextScope) => {
+				this.getSettings().contextScope = scope;
+				void this.saveSettings();
+			},
 			onSubmit: (instruction: string, signal: AbortSignal, onChunk?: (delta: string) => void) =>
-				this.generateRefinedText(snapshot, instruction, signal, onChunk),
+				this.generateRefinedText(editor, snapshot, instruction, signal, onChunk),
 			onApply: (refinedText: string) => {
 				replaceSnapshotSelection(editor, snapshot, refinedText, this.getTranslator());
 			},
@@ -132,9 +144,10 @@ export class RefineSelectionService {
 		};
 	}
 
-	// Generation only — never touches the editor. The panel decides what happens to
-	// the result (immediate apply vs preview), and applies via onApply.
+	// Generation only — never touches the editor except to READ context. The panel
+	// decides what happens to the result (immediate apply vs preview) via onApply.
 	private async generateRefinedText(
+		editor: Editor,
 		snapshot: SelectionSnapshot,
 		instruction: string,
 		signal: AbortSignal,
@@ -150,7 +163,12 @@ export class RefineSelectionService {
 		// ProviderFactory resolves the platform-effective provider itself; a stored
 		// desktop CLI choice silently routes to an API provider on mobile.
 		const provider = this.providerFactory.create(settings);
-		const finalInstruction = buildFinalInstruction(settings.prompt.prependInstruction, trimmedInstruction);
+		const context = extractContextForScope(editor, snapshot, settings.contextScope);
+		const finalInstruction = buildFinalInstruction(
+			settings.prompt.prependInstruction,
+			trimmedInstruction,
+			context,
+		);
 		const refinedText = await provider.generate(snapshot.text, finalInstruction, { signal, onChunk });
 		throwIfAborted(signal);
 		if (!refinedText.trim()) {
@@ -187,7 +205,39 @@ function getReplacementEnd(from: EditorPosition, insertedText: string): EditorPo
 	return { line: from.line + lines.length - 1, ch: lastLine.length };
 }
 
-function buildFinalInstruction(prependInstruction: string, userInstruction: string): string {
+// Exported for tests. Context is read-only reference material — the model must still
+// rewrite ONLY the selected text it receives through the Text channel.
+export function buildFinalInstruction(
+	prependInstruction: string,
+	userInstruction: string,
+	context: string | null = null,
+): string {
 	const instructionParts = [prependInstruction.trim(), userInstruction.trim()].filter((value) => value.length > 0);
-	return `${instructionParts.join("\n\n")}\n\nOutput requirements:\n${OUTPUT_POLICY}`;
+	const contextBlock = context && context.trim().length > 0
+		? `\n\nSurrounding context (reference only — rewrite ONLY the text given below, never the context):\n${context}`
+		: "";
+	return `${instructionParts.join("\n\n")}${contextBlock}\n\nOutput requirements:\n${OUTPUT_POLICY}`;
+}
+
+// Exported for tests: resolves what extra material a scope sends along.
+export function extractContextForScope(
+	editor: Editor,
+	snapshot: SelectionSnapshot,
+	scope: ContextScope,
+): string | null {
+	if (scope === "selection") {
+		return null;
+	}
+
+	const noteText = editor.getValue();
+	if (scope === "note") {
+		const lines = noteText.split("\n");
+		const offset = positionToOffset(lines, snapshot.from.line, snapshot.from.ch);
+		return extractNoteContext(noteText, offset);
+	}
+
+	const lines = noteText.split("\n");
+	const paragraph = extractParagraphContext(lines, snapshot.from.line, snapshot.to.line);
+	// The paragraph IS the selection (nothing around it) — no extra context to send.
+	return paragraph === snapshot.text ? null : paragraph;
 }
