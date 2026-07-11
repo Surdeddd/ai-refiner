@@ -6,6 +6,7 @@ import {
 	getSupportedProvidersForCurrentPlatform,
 } from "../../providers/providerAvailability";
 import { normalizeCliArgsForExecutable } from "../../providers/cliPresets";
+import { getProviderLabel } from "../providerLabels";
 import { isPrivateHost } from "../../utils/api";
 import type { DiscoveryProviderId } from "../modelDiscovery";
 import type { AIRefinerSettings, ApiProviderId, CliProviderId, ProviderId } from "../types";
@@ -241,21 +242,6 @@ function renderModelInput(
 	});
 }
 
-function getProviderLabel(providerId: ProviderId, t: Translator): string {
-	switch (providerId) {
-		case "gemini-cli":
-			return t("settings.provider.geminiCli");
-		case "codex-cli":
-			return t("settings.provider.codexCli");
-		case "ollama-local":
-			return t("settings.provider.ollamaLocal");
-		case "custom-api":
-			return t("settings.provider.customApi");
-		default:
-			return assertNever(providerId);
-	}
-}
-
 function getCliConfig(
 	settings: AIRefinerSettings,
 	providerId: CliProviderId,
@@ -285,7 +271,3 @@ function isCliProviderId(value: ProviderId): value is CliProviderId {
 	return value === "gemini-cli" || value === "codex-cli";
 }
 
-function assertNever(value: never): never {
-	void value;
-	throw new Error("Unsupported setting value.");
-}

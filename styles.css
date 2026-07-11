@@ -313,3 +313,14 @@
 	flex: 0 1 auto;
 	font-size: var(--font-ui-small);
 }
+
+/* Per-prompt provider/model routing */
+.ai-refiner-prompt-editor__routing {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.ai-refiner-prompt-editor__routing input {
+	flex: 1 1 auto;
+}

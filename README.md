@@ -14,7 +14,10 @@ nothing leaves your machine unless you configure it to.
   touches the note. Prefer the old behavior? Switch **Result mode** to
   *Replace immediately* in settings (upgrades from older versions keep it).
 - **Quick prompt presets** — one-click Fix grammar, Make clearer, Shorten, Formal tone,
-  Translate — fully editable, and you can add your own.
+  Translate — fully editable, and you can add your own. Each prompt can optionally pin
+  its own provider and model (e.g. run "Fix grammar" through a fast local model while
+  everything else uses your default); the pin applies while the panel's instruction
+  still matches the prompt, and CLI pins degrade to an API provider on mobile.
 - **Context scope** — optionally send the surrounding paragraph or the whole note
   (trimmed to a window around the selection for huge notes) as read-only reference;
   only the selection is ever replaced. Pick the scope right in the panel.

@@ -1,6 +1,6 @@
 import { type Editor, type EditorPosition, Notice } from "obsidian";
 import type { Translator } from "../i18n";
-import { resolveQuickPrompts } from "../prompts/quickPrompts";
+import { findQuickPromptForInstruction, resolveQuickPrompts } from "../prompts/quickPrompts";
 import { ProviderFactory } from "../providers/ProviderFactory";
 import { throwIfAborted } from "../providers/IAIProvider";
 import type { AIRefinerSettings } from "../settings/types";
@@ -160,9 +160,17 @@ export class RefineSelectionService {
 		throwIfAborted(signal);
 
 		const settings = this.getSettings();
-		// ProviderFactory resolves the platform-effective provider itself; a stored
-		// desktop CLI choice silently routes to an API provider on mobile.
-		const provider = this.providerFactory.create(settings);
+		// A quick prompt may pin its own provider/model; it applies while the
+		// submitted instruction still matches that prompt. ProviderFactory resolves
+		// the platform-effective provider either way (CLI degrades to API on mobile).
+		const matchedPrompt = findQuickPromptForInstruction(
+			resolveQuickPrompts(settings.quickPrompts, this.getTranslator()),
+			trimmedInstruction,
+		);
+		const provider = this.providerFactory.create(settings, {
+			providerId: matchedPrompt?.providerId,
+			model: matchedPrompt?.model,
+		});
 		const context = extractContextForScope(editor, snapshot, settings.contextScope);
 		const finalInstruction = buildFinalInstruction(
 			settings.prompt.prependInstruction,

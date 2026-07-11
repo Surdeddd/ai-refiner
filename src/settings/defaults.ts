@@ -296,13 +296,29 @@ function sanitizeQuickPromptList(
 		}
 
 		seen.add(id);
-		result.push({
+		const prompt: AIRefinerSettings["quickPrompts"]["custom"][number] = {
 			id,
 			label: sanitizePlainString(item.label),
 			instruction: sanitizePlainString(item.instruction),
-		});
+		};
+		const providerId = sanitizeStrictProviderId(item.providerId);
+		if (providerId) {
+			prompt.providerId = providerId;
+		}
+		const model = sanitizePlainString(item.model);
+		if (model) {
+			prompt.model = model;
+		}
+		result.push(prompt);
 	}
 	return result;
+}
+
+// Strict (no legacy mapping): unknown values drop the override entirely.
+function sanitizeStrictProviderId(value: unknown): ProviderId | undefined {
+	return value === "gemini-cli" || value === "codex-cli" || value === "ollama-local" || value === "custom-api"
+		? value
+		: undefined;
 }
 
 function sanitizeHiddenBuiltInIds(value: unknown): string[] {

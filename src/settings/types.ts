@@ -41,6 +41,12 @@ export interface QuickPromptItem {
 	id: string;
 	label: string;
 	instruction: string;
+	// Optional per-prompt routing: run this prompt through a specific provider
+	// and/or model instead of the globally active one. Subject to the same
+	// platform-effective fallback (a CLI override degrades to an API provider
+	// on mobile). Model applies to API/local providers only.
+	providerId?: ProviderId;
+	model?: string;
 }
 
 export interface QuickPromptsConfig {

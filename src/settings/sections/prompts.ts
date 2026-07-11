@@ -1,8 +1,51 @@
 import { Setting } from "obsidian";
 import type { Translator } from "../../i18n";
 import { BUILT_IN_QUICK_PROMPTS, getBuiltInQuickPrompt } from "../../prompts/quickPrompts";
-import type { QuickPromptItem } from "../types";
+import { PROVIDER_ORDER } from "../../providers/providerAvailability";
+import { getProviderLabel } from "../providerLabels";
+import type { ProviderId, QuickPromptItem } from "../types";
 import type { SettingsSectionContext } from "./context";
+
+interface PromptRouting {
+	providerId?: ProviderId;
+	model?: string;
+}
+
+// Provider/model routing row shared by built-in and custom prompt editors. The
+// dropdown's empty value means "use the globally active provider".
+function renderRoutingControls(
+	card: HTMLElement,
+	t: Translator,
+	current: PromptRouting,
+	onChange: (routing: PromptRouting) => void,
+): void {
+	const routingEl = card.createDiv({ cls: "ai-refiner-prompt-editor__routing" });
+
+	const select = routingEl.createEl("select", { cls: "dropdown" });
+	select.createEl("option", { value: "", text: t("settings.quickPrompts.providerDefault") });
+	for (const providerId of PROVIDER_ORDER) {
+		select.createEl("option", { value: providerId, text: getProviderLabel(providerId, t) });
+	}
+	select.value = current.providerId ?? "";
+
+	const modelInput = routingEl.createEl("input", { type: "text" });
+	modelInput.placeholder = t("settings.quickPrompts.modelPlaceholder");
+	modelInput.value = current.model ?? "";
+
+	const emit = (): void => {
+		const value = select.value;
+		onChange({
+			providerId: isProviderId(value) ? value : undefined,
+			model: modelInput.value.trim() || undefined,
+		});
+	};
+	select.addEventListener("change", emit);
+	modelInput.addEventListener("input", emit);
+}
+
+function isProviderId(value: string): value is ProviderId {
+	return PROVIDER_ORDER.includes(value as ProviderId);
+}
 
 export function renderPrependInstructionSection(containerEl: HTMLElement, ctx: SettingsSectionContext): void {
 	const { t } = ctx;
@@ -137,11 +180,16 @@ function renderBuiltInPromptEditor(containerEl: HTMLElement, promptId: string, c
 	instructionInput.placeholder = defaults.instruction;
 	instructionInput.value = instructionValue;
 
+	let routing: PromptRouting = { providerId: override?.providerId, model: override?.model };
 	const persist = (): void => {
-		updateBuiltInPromptOverride(ctx, promptId, labelInput.value, instructionInput.value, t);
+		updateBuiltInPromptOverride(ctx, promptId, labelInput.value, instructionInput.value, routing, t);
 	};
 	labelInput.addEventListener("input", persist);
 	instructionInput.addEventListener("input", persist);
+	renderRoutingControls(card, t, routing, (nextRouting) => {
+		routing = nextRouting;
+		persist();
+	});
 
 	const actions = card.createDiv({ cls: "ai-refiner-prompt-editor__actions" });
 	const resetButton = actions.createEl("button", { text: t("settings.quickPrompts.resetOne") });
@@ -191,6 +239,15 @@ function renderCustomPromptEditor(containerEl: HTMLElement, prompt: QuickPromptI
 	};
 	labelInput.addEventListener("input", persist);
 	instructionInput.addEventListener("input", persist);
+	renderRoutingControls(card, t, { providerId: prompt.providerId, model: prompt.model }, (routing) => {
+		const target = ctx.settings.quickPrompts.custom.find((item) => item.id === prompt.id);
+		if (!target) {
+			return;
+		}
+		target.providerId = routing.providerId;
+		target.model = routing.model;
+		ctx.scheduleSave();
+	});
 
 	const actions = card.createDiv({ cls: "ai-refiner-prompt-editor__actions" });
 	const deleteButton = actions.createEl("button", { text: t("settings.quickPrompts.delete") });
@@ -208,6 +265,7 @@ function updateBuiltInPromptOverride(
 	promptId: string,
 	label: string,
 	instruction: string,
+	routing: PromptRouting,
 	t: Translator,
 ): void {
 	const defaults = getBuiltInQuickPrompt(promptId, t);
@@ -221,7 +279,10 @@ function updateBuiltInPromptOverride(
 
 	const normalizedLabel = label.trim();
 	const normalizedInstruction = instruction.trim();
-	const isDefaultValue = normalizedLabel === defaults.label && normalizedInstruction === defaults.instruction;
+	const isDefaultValue = normalizedLabel === defaults.label
+		&& normalizedInstruction === defaults.instruction
+		&& !routing.providerId
+		&& !routing.model;
 	const overrides = ctx.settings.quickPrompts.builtInOverrides;
 	const existingIndex = overrides.findIndex((item) => item.id === promptId);
 
@@ -238,6 +299,12 @@ function updateBuiltInPromptOverride(
 		label,
 		instruction,
 	};
+	if (routing.providerId) {
+		nextValue.providerId = routing.providerId;
+	}
+	if (routing.model) {
+		nextValue.model = routing.model;
+	}
 
 	if (existingIndex >= 0) {
 		overrides[existingIndex] = nextValue;

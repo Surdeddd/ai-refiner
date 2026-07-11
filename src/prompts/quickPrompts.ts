@@ -88,12 +88,18 @@ export function resolveQuickPrompts(
 			instruction: t(definition.instructionKey),
 		};
 		const override = builtInOverrides.get(definition.id);
-		const prompt = {
+		const prompt: QuickPromptItem = {
 			id: definition.id,
 			label: override?.label.trim() || defaultPrompt.label,
 			instruction:
 				override?.instruction.trim() || defaultPrompt.instruction,
 		};
+		if (override?.providerId) {
+			prompt.providerId = override.providerId;
+		}
+		if (override?.model?.trim()) {
+			prompt.model = override.model.trim();
+		}
 		if (!prompt.label || !prompt.instruction || seen.has(prompt.id)) {
 			continue;
 		}
@@ -108,6 +114,12 @@ export function resolveQuickPrompts(
 			label: customPrompt.label.trim(),
 			instruction: customPrompt.instruction.trim(),
 		};
+		if (customPrompt.providerId) {
+			prompt.providerId = customPrompt.providerId;
+		}
+		if (customPrompt.model?.trim()) {
+			prompt.model = customPrompt.model.trim();
+		}
 		if (
 			!prompt.id ||
 			!prompt.label ||
@@ -122,4 +134,18 @@ export function resolveQuickPrompts(
 	}
 
 	return result;
+}
+
+// The panel doesn't track which preset filled the textarea; a prompt's routing
+// override applies when the submitted instruction still exactly matches that
+// prompt (edited instructions honestly fall back to the global provider).
+export function findQuickPromptForInstruction(
+	prompts: QuickPromptItem[],
+	instruction: string,
+): QuickPromptItem | null {
+	const trimmed = instruction.trim();
+	if (!trimmed) {
+		return null;
+	}
+	return prompts.find((prompt) => prompt.instruction.trim() === trimmed) ?? null;
 }
