@@ -1,6 +1,6 @@
 {
 	"name": "ai-refiner",
-	"version": "1.0.1",
+	"version": "1.1.0",
 	"description": "AI Refiner plugin for Obsidian with floating prompt and multi-provider backend.",
 	"main": "main.js",
 	"type": "module",

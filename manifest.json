@@ -1,7 +1,7 @@
 {
 	"id": "ai-refiner",
 	"name": "AI Refiner",
-	"version": "1.0.1",
+	"version": "1.1.0",
 	"minAppVersion": "1.8.7",
 	"description": "Refine selected text with a floating prompt using CLI or API providers.",
 	"author": "Maxim Kravtsov",
