@@ -1,10 +1,16 @@
 # AI Refiner
 
+Русская версия: [README.ru.md](./README.ru.md)
+
 An Obsidian plugin that refines selected text in place through a floating prompt.
 Select text, describe how you want it changed, and the result replaces your selection.
 
 It works with cloud APIs, local models, and AI CLIs — you choose the backend, and
 nothing leaves your machine unless you configure it to.
+
+![The AI Refiner floating prompt over a note with quick prompts and an instruction typed in](docs/screenshots/prompt.png)
+
+![The result preview showing a word-level diff against the selection with Discard, Copy, Retry and Apply buttons](docs/screenshots/diff.png)
 
 ## Features
 
@@ -13,9 +19,9 @@ nothing leaves your machine unless you configure it to.
   diff against your selection with **Apply / Retry / Copy / Discard** before anything
   touches the note. Prefer the old behavior? Switch **Result mode** to
   *Replace immediately* in settings (upgrades from older versions keep it).
-- **Quick prompt presets** — one-click Fix grammar, Make clearer, Shorten, Formal tone,
-  Translate — fully editable, and you can add your own. Each prompt can optionally pin
-  its own provider and model (e.g. run "Fix grammar" through a fast local model while
+- **Quick prompt presets** — one-click Fix grammar, Make clearer, Make shorter, Formal tone,
+  Translate to English, Translate to Russian — fully editable, and you can add your
+  own. Each prompt can optionally pin its own provider and model (e.g. run "Fix grammar" through a fast local model while
   everything else uses your default); the pin applies while the panel's instruction
   still matches the prompt, and CLI pins degrade to an API provider on mobile.
 - **Context scope** — optionally send the surrounding paragraph or the whole note
