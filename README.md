@@ -186,4 +186,4 @@ is what serves older Obsidian installs the last compatible release.
 
 ## License
 
-Released under the 0BSD license. See [LICENSE](LICENSE).
+Released under the MIT license. See [LICENSE](LICENSE).
